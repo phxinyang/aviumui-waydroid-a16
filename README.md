@@ -8,6 +8,13 @@
 
 镜像已构建成功并在平板上启动到 launcher 桌面。图形管线（surfaceflinger / system_server / gralloc）打通，触控输入栈正常。
 
+**镜像状态（2026-08-04）**：
+- 可用版：`system.img` md5 `7a4b98eb`（desktop=true，能显示，single-window 正常，但拖拽窗口会触发 A16 桌面模式）
+- 实验版：`system.img` md5 `49c3f547`（desktop=false 重编，**黑屏**——根因是重编后 SF 要求 Composer3，vendor 只有 Composer2.4，与 desktop 改动无关）
+- 构建机保留：`system.img.pre-desktopoff`（旧可用版）+ 当前构建产物
+
+**窗口模式状态**：见 [docs/WINDOWING.md](docs/WINDOWING.md)（A16 桌面模式 × waydroid 的冲突与研究方向）。
+
 已知遗留问题见 [docs/ISSUES.md](docs/ISSUES.md)。
 
 ## 端到端流程
@@ -54,6 +61,7 @@
 ## 文档
 
 - [docs/FIXES.md](docs/FIXES.md) — 12+ 处修复各自的根因与依据（最有价值的部分）
+- [docs/WINDOWING.md](docs/WINDOWING.md) — A16 桌面模式 × waydroid 窗口冲突与研究（2026-08-04）
 - [docs/TOPOLOGY.md](docs/TOPOLOGY.md) — 机器、路径、常用命令
 - [docs/REFERENCES.md](docs/REFERENCES.md) — 参考仓库 URL + commit
 - [docs/ISSUES.md](docs/ISSUES.md) — 已知遗留问题
