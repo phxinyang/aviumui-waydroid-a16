@@ -4,6 +4,9 @@
 *.img
 *.img.bak-*
 
+# 官方引用源码（本地只读 clone，不进 Git）
+references/src/
+
 # 大体积二进制 / 缓存
 *.tar.gz
 *.zip
