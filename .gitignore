@@ -11,6 +11,8 @@ references/src/
 *.tar.gz
 *.zip
 ccache/
+__pycache__/
+*.py[cod]
 
 # 会话与本地杂项
 .history
@@ -18,4 +20,3 @@ ccache/
 
 # 编辑器本地元数据
 .vscode/
-
