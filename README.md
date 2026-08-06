@@ -57,7 +57,11 @@
 | `manifests/waydroid.xml` | local manifest：移除 50 个 qcom SoC 项目 + cuttlefish/trusty/openwrt |
 | `scripts/resume-build.sh` | 历史现场续编脚本；会直接改源码和清理部分 generated intermediates，不是干净复现入口 |
 | `scripts/patch_appop.py` | AppOpService 修复（跳过 flag 关闭但有 app op 的权限） |
+| `scripts/patch_desktop.py` | 保留：A16 desktop/freeform 产品配置开关 |
 | `scripts/archive/` | 补丁冲突排查期的一次性脚本，留档 |
+| `archive/experiments/` | 已证伪的窗口补丁脚本（RawName/Caption 推断），见其中 README |
+| `archive/deprecated/` | 禁用的 `patch-and-build.sh`（含 `repo sync`/`reset --hard`），见其中 README |
+| `archive/build-state-20260807/` | 接手现场冻结：源码 diff + hwc 实验提交 + artifact manifest |
 | `patches/` | 树内源码改动导出（**部分待补，见 patches/README.md**） |
 | `host/` | 平板宿主侧配置与二进制 |
 | `docs/` | 修复因果链、机器拓扑、参考仓库、遗留问题 |
