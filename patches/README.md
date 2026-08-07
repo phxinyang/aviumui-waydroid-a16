@@ -4,25 +4,24 @@
 
 ## 缺口清单（按优先级）
 
-### 缺口 1：apexd 修复（最高优先级）
+### 缺口 1：apexd 树内提交（配方已补，分仓提交待完成）
 - 文件：`system/apex/apexd/apexd_loop.cpp`，3 处改动（fsopen fallback + read_ahead 两处 return 注释掉）
 - 依据：redroid-doc issue #925 + dragon-waydroid 补丁
 - 详见 [docs/FIXES.md](FIXES.md) B1
-- **为什么高危**：整个项目最难定位的修复，唯一副本在树里，`repo sync` 即丢（历史上 170 补丁已被抹过一次）
+- `scripts/patch_apexd_container_sysfs.py` 已能从 upstream 或旧注释式现场生成明确的 best-effort 失败路径，并有双遍幂等测试。
+- 仍需在 `system/apex` 独立提交并完成窄构建；在此之前 `repo sync` 仍会丢掉构建树提交。
 - **导出方式**：
   ```bash
   cd /build/system/apex
   git diff > patches/apexd_loop_fix.patch
   ```
 
-### 缺口 2：SecureLockDeviceRepository try-catch
+### 缺口 2：SecureLockDeviceRepository try-catch（重放脚本已存在）
 - 文件：`frameworks/base/packages/SystemUI/src/com/android/systemui/securelockdevice/data/repository/SecureLockDeviceRepository.kt`
 - register/unregister 各包 `catch (_: SecurityException)`
 - 详见 [docs/FIXES.md](FIXES.md) C3
-- **额外断链**：`scripts/resume-build.sh` 里 `if ! grep -q 'catch (_: SecurityException)' ...` 分支调用 `/build/patch_secure_lock.py`，**该文件在构建机上不存在**。当前能跑是因为条件为假直接跳过；树一旦重置，此修复无法重建。
-- **修法**（二选一）：
-  - 导出成 patch 放进本目录，改 resume-build.sh 用 `git apply`
-  - 或写一个幂等的 `patch_secure_lock.py`（sed/正则注入 try-catch），重建脚本链
+- `scripts/patch_secure_lock.py` 已在主配方仓，旧/new block 均有硬门禁；先前“文件不存在”结论已撤销。
+- 仍需确认 `frameworks/base` checkpoint 中该改动的最终提交边界，并在干净树重放一次。
 
 ### 缺口 3（半满）：RANGING / AppOpService
 - `core/res/AndroidManifest.xml` 的 RANGING featureFlag 移除：**已由 resume-build.sh 的 sed 幂等处理**（非树内裸改，重建无忧）
