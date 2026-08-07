@@ -1,4 +1,4 @@
-From 56b8965a61825a4cdec5f3f00edc543deff27bf6 Mon Sep 17 00:00:00 2001
+From d6af9d8758ab8a76f40b4085d69c04f81fb957ec Mon Sep 17 00:00:00 2001
 From: xinyang <xinyang@localhost>
 Date: Fri, 7 Aug 2026 03:12:32 +0000
 Subject: [PATCH] =?UTF-8?q?=E6=A1=A5=E6=8E=A5=20Android=20=E4=B8=8E=20Wayl?=
@@ -17,17 +17,17 @@ Change-Id: I01816a916226247453de0d57b0348f791b9b32f4
  create mode 100644 libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt
 
 diff --git a/libs/WindowManager/Shell/Android.bp b/libs/WindowManager/Shell/Android.bp
-index 34d3f4773273..0efcc812109b 100644
+index 34d3f4773273..94778625f1d3 100644
 --- a/libs/WindowManager/Shell/Android.bp
 +++ b/libs/WindowManager/Shell/Android.bp
-@@ -178,6 +178,7 @@ android_library {
-         // Soong fails to automatically add this dependency because all the
-         // *.kt sources are inside a filegroup.
-         "kotlin-annotations",
+@@ -173,6 +173,7 @@ android_library {
+         "lottie",
+         "mechanics",
+         "perfetto_trace_java_protos",
 +        "vendor.waydroid.window-V1.3-java",
      ],
-     flags_packages: [
-         "am_flags",
+     libs: [
+         // Soong fails to automatically add this dependency because all the
 diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt
 index b6fd5fc459a5..d704ac4ed85d 100644
 --- a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt
@@ -485,4 +485,3 @@ index a7e083c18a63..a0cd53e867c0 100644
          boundsBeforeMaximizeByTaskId.set(taskId, Rect(bounds))
 -- 
 2.43.0
-
