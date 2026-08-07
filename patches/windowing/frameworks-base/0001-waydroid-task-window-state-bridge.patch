@@ -1,0 +1,488 @@
+From 56b8965a61825a4cdec5f3f00edc543deff27bf6 Mon Sep 17 00:00:00 2001
+From: xinyang <xinyang@localhost>
+Date: Fri, 7 Aug 2026 03:12:32 +0000
+Subject: [PATCH] =?UTF-8?q?=E6=A1=A5=E6=8E=A5=20Android=20=E4=B8=8E=20Wayl?=
+ =?UTF-8?q?and=20task=20=E7=AA=97=E5=8F=A3=E7=8A=B6=E6=80=81?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Change-Id: I01816a916226247453de0d57b0348f791b9b32f4
+---
+ libs/WindowManager/Shell/Android.bp           |   1 +
+ .../desktopmode/DesktopTasksController.kt     |  19 +
+ .../WaydroidTaskWindowStateBridge.kt          | 369 ++++++++++++++++++
+ .../desktopmode/data/DesktopRepository.kt     |   4 +
+ 4 files changed, 393 insertions(+)
+ create mode 100644 libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt
+
+diff --git a/libs/WindowManager/Shell/Android.bp b/libs/WindowManager/Shell/Android.bp
+index 34d3f4773273..0efcc812109b 100644
+--- a/libs/WindowManager/Shell/Android.bp
++++ b/libs/WindowManager/Shell/Android.bp
+@@ -178,6 +178,7 @@ android_library {
+         // Soong fails to automatically add this dependency because all the
+         // *.kt sources are inside a filegroup.
+         "kotlin-annotations",
++        "vendor.waydroid.window-V1.3-java",
+     ],
+     flags_packages: [
+         "am_flags",
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt
+index b6fd5fc459a5..d704ac4ed85d 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt
+@@ -311,6 +311,7 @@ class DesktopTasksController(
+ 
+     private lateinit var splitScreenController: SplitScreenController
+     lateinit var freeformTaskTransitionStarter: FreeformTaskTransitionStarter
++    private lateinit var waydroidTaskWindowStateBridge: WaydroidTaskWindowStateBridge
+     // Launch cookie used to identify a drag and drop transition to fullscreen after it has begun.
+     // Used to prevent handleRequest from moving the new fullscreen task to freeform.
+     private var dragAndDropFullscreenCookie: Binder? = null
+@@ -326,6 +327,14 @@ class DesktopTasksController(
+ 
+     init {
+         desktopMode = DesktopModeImpl()
++        waydroidTaskWindowStateBridge =
++            WaydroidTaskWindowStateBridge(
++                shellTaskOrganizer,
++                displayController,
++                userRepositories,
++                mainExecutor,
++                this,
++            )
+         if (desktopState.canEnterDesktopMode) {
+             shellInit.addInitCallback({ onInit() }, this)
+         }
+@@ -343,6 +352,7 @@ class DesktopTasksController(
+ 
+     private fun onInit() {
+         logD("onInit")
++        waydroidTaskWindowStateBridge.start()
+         shellCommandHandler.addDumpCallback(this::dump, this)
+         shellCommandHandler.addCommandCallback("desktopmode", desktopModeShellCommandHandler, this)
+         shellController.addExternalInterface(
+@@ -1908,6 +1918,9 @@ class DesktopTasksController(
+                 excludeTaskId = taskId,
+             )
+         )
++        if (!isMinimizingToPip) {
++            waydroidTaskWindowStateBridge.onTaskMinimized(taskInfo)
++        }
+     }
+ 
+     /**
+@@ -2859,6 +2872,11 @@ class DesktopTasksController(
+             wct,
+             interaction.animationStartBounds,
+         )
++        waydroidTaskWindowStateBridge.onTaskSizeToggled(
++            taskInfo,
++            maximized = willMaximize,
++            restoreBounds = if (willMaximize) currentTaskBounds else destinationBounds,
++        )
+     }
+ 
+     private fun dragToMaximizeDesktopTask(
+@@ -6388,6 +6406,7 @@ class DesktopTasksController(
+ 
+     /** Called when a task's info changes. */
+     fun onTaskInfoChanged(taskInfo: RunningTaskInfo) {
++        waydroidTaskWindowStateBridge.onTaskInfoChanged(taskInfo)
+         if (!DesktopModeFlags.ENABLE_FULLY_IMMERSIVE_IN_DESKTOP.isTrue) return
+         val repository = userRepositories.getProfile(taskInfo.userId)
+         val inImmersive = repository.isTaskInFullImmersiveState(taskInfo.taskId)
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt
+new file mode 100644
+index 000000000000..71ef2198c98a
+--- /dev/null
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt
+@@ -0,0 +1,369 @@
++/*
++ * Copyright (C) 2026 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ */
++
++package com.android.wm.shell.desktopmode
++
++import android.app.ActivityManager.RunningTaskInfo
++import android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM
++import android.graphics.Rect
++import android.os.IHwBinder
++import android.os.RemoteException
++import android.util.Slog
++import com.android.wm.shell.ShellTaskOrganizer
++import com.android.wm.shell.common.DisplayController
++import com.android.wm.shell.common.ShellExecutor
++import com.android.wm.shell.desktopmode.DesktopModeEventLogger.Companion.InputMethod
++import com.android.wm.shell.desktopmode.DesktopModeEventLogger.Companion.MinimizeReason
++import com.android.wm.shell.desktopmode.DesktopModeEventLogger.Companion.UnminimizeReason
++import com.android.wm.shell.desktopmode.common.ToggleTaskSizeInteraction
++import java.util.NoSuchElementException
++import java.util.concurrent.atomic.AtomicLong
++import vendor.waydroid.window.V1_3.IWaydroidWindow
++import vendor.waydroid.window.V1_3.IWaydroidWindowCallback
++import vendor.waydroid.window.V1_3.TaskWindowBounds
++import vendor.waydroid.window.V1_3.TaskWindowState
++import vendor.waydroid.window.V1_3.TaskWindowStateSource
++
++/** Keeps Android desktop-task state and the host xdg-toplevel state in one task-ID protocol. */
++internal class WaydroidTaskWindowStateBridge(
++    private val shellTaskOrganizer: ShellTaskOrganizer,
++    private val displayController: DisplayController,
++    private val userRepositories: DesktopUserRepositories,
++    private val mainExecutor: ShellExecutor,
++    private val desktopTasksController: DesktopTasksController,
++) {
++    private data class StateSnapshot(val state: Int, val restoreBounds: Rect)
++
++    private data class HostRequest(val state: Int, val generation: Long)
++
++    private var waydroidWindow: IWaydroidWindow? = null
++    private var reconnectScheduled = false
++    private val nextGeneration = AtomicLong(1)
++    private val lastPublishedByTaskId = mutableMapOf<Int, StateSnapshot>()
++    private val pendingHostRequestByTaskId = mutableMapOf<Int, HostRequest>()
++
++    private val deathRecipient =
++        object : IHwBinder.DeathRecipient {
++            override fun serviceDied(cookie: Long) {
++                mainExecutor.execute {
++                    Slog.w(TAG, "Waydroid window state service died cookie=$cookie")
++                    waydroidWindow = null
++                    lastPublishedByTaskId.clear()
++                    scheduleReconnect()
++                }
++            }
++        }
++
++    private val callback =
++        object : IWaydroidWindowCallback.Stub() {
++            override fun requestTaskWindowState(
++                taskID: Int,
++                state: Int,
++                bounds: TaskWindowBounds,
++                generation: Long,
++            ) {
++                mainExecutor.execute { handleHostRequest(taskID, state, generation) }
++            }
++
++            override fun queryTaskWindowState(taskID: Int) {
++                mainExecutor.execute { publishRequestedState(taskID) }
++            }
++        }
++
++    fun start() {
++        if (ensureService() == null) scheduleReconnect()
++    }
++
++    fun onTaskInfoChanged(taskInfo: RunningTaskInfo) {
++        if (taskInfo.windowingMode != WINDOWING_MODE_FREEFORM) return
++        val pending = pendingHostRequestByTaskId[taskInfo.taskId]
++        if (pending == null) {
++            publishCurrentState(taskInfo)
++            return
++        }
++
++        val currentState = getCurrentState(taskInfo)
++        if (currentState == pending.state) {
++            publishCurrentState(
++                taskInfo,
++                source = TaskWindowStateSource.HOST,
++                generation = pending.generation,
++                force = true,
++            )
++            return
++        }
++
++        val repository = userRepositories.getProfile(taskInfo.userId)
++        if (
++            pending.state == TaskWindowState.MAXIMIZED &&
++                currentState == TaskWindowState.NORMAL &&
++                !repository.isMinimizedTask(taskInfo.taskId)
++        ) {
++            desktopTasksController.toggleDesktopTaskSize(
++                taskInfo,
++                ToggleTaskSizeInteraction(
++                    direction = ToggleTaskSizeInteraction.Direction.MAXIMIZE,
++                    source = ToggleTaskSizeInteraction.Source.KEYBOARD_SHORTCUT,
++                    inputMethod = InputMethod.MOUSE,
++                ),
++            )
++        }
++    }
++
++    fun onTaskMinimized(taskInfo: RunningTaskInfo) {
++        publishRequestedAndroidState(
++            taskInfo,
++            TaskWindowState.MINIMIZED,
++            taskInfo.configuration.windowConfiguration.bounds,
++        )
++    }
++
++    fun onTaskSizeToggled(
++        taskInfo: RunningTaskInfo,
++        maximized: Boolean,
++        restoreBounds: Rect,
++    ) {
++        publishRequestedAndroidState(
++            taskInfo,
++            if (maximized) TaskWindowState.MAXIMIZED else TaskWindowState.NORMAL,
++            if (maximized) restoreBounds else Rect(),
++        )
++    }
++
++    private fun handleHostRequest(taskId: Int, state: Int, generation: Long) {
++        if (
++            taskId <= 0 ||
++                generation <= 0 ||
++                state !in
++                    setOf(
++                        TaskWindowState.NORMAL,
++                        TaskWindowState.MAXIMIZED,
++                        TaskWindowState.MINIMIZED,
++                    )
++        ) {
++            Slog.w(TAG, "Ignoring malformed host state task=$taskId state=$state gen=$generation")
++            return
++        }
++        val taskInfo = shellTaskOrganizer.getRunningTaskInfo(taskId) ?: return
++        if (taskInfo.windowingMode != WINDOWING_MODE_FREEFORM) return
++        pendingHostRequestByTaskId[taskId] = HostRequest(state, generation)
++
++        val currentState = getCurrentState(taskInfo)
++        if (currentState == state) {
++            publishCurrentState(
++                taskInfo,
++                source = TaskWindowStateSource.HOST,
++                generation = generation,
++                force = true,
++            )
++            return
++        }
++
++        val repository = userRepositories.getProfile(taskInfo.userId)
++        when (state) {
++            TaskWindowState.MINIMIZED ->
++                desktopTasksController.minimizeTask(taskInfo, MinimizeReason.KEY_GESTURE)
++            TaskWindowState.NORMAL ->
++                if (repository.isMinimizedTask(taskId)) {
++                    desktopTasksController.moveTaskToFront(
++                        taskInfo,
++                        unminimizeReason = UnminimizeReason.UNKNOWN,
++                    )
++                } else {
++                    desktopTasksController.toggleDesktopTaskSize(
++                        taskInfo,
++                        ToggleTaskSizeInteraction(
++                            direction = ToggleTaskSizeInteraction.Direction.RESTORE,
++                            source = ToggleTaskSizeInteraction.Source.KEYBOARD_SHORTCUT,
++                            inputMethod = InputMethod.MOUSE,
++                        ),
++                    )
++                }
++            TaskWindowState.MAXIMIZED ->
++                if (repository.isMinimizedTask(taskId)) {
++                    desktopTasksController.moveTaskToFront(
++                        taskInfo,
++                        unminimizeReason = UnminimizeReason.UNKNOWN,
++                    )
++                } else {
++                    desktopTasksController.toggleDesktopTaskSize(
++                        taskInfo,
++                        ToggleTaskSizeInteraction(
++                            direction = ToggleTaskSizeInteraction.Direction.MAXIMIZE,
++                            source = ToggleTaskSizeInteraction.Source.KEYBOARD_SHORTCUT,
++                            inputMethod = InputMethod.MOUSE,
++                        ),
++                    )
++                }
++        }
++    }
++
++    private fun publishRequestedState(taskId: Int) {
++        val tasks =
++            if (taskId == 0) shellTaskOrganizer.getRunningTasks()
++            else listOfNotNull(shellTaskOrganizer.getRunningTaskInfo(taskId))
++        for (taskInfo in tasks) {
++            if (taskInfo.windowingMode == WINDOWING_MODE_FREEFORM) {
++                publishCurrentState(
++                    taskInfo,
++                    source = TaskWindowStateSource.RECONCILE,
++                    generation = nextGeneration.getAndIncrement(),
++                    force = true,
++                )
++            }
++        }
++    }
++
++    private fun publishRequestedAndroidState(
++        taskInfo: RunningTaskInfo,
++        state: Int,
++        restoreBounds: Rect,
++    ) {
++        val hostRequest = pendingHostRequestByTaskId[taskInfo.taskId]
++        if (hostRequest?.state == state) {
++            publishState(
++                taskInfo.taskId,
++                state,
++                restoreBounds,
++                TaskWindowStateSource.HOST,
++                hostRequest.generation,
++                force = true,
++            )
++        } else {
++            publishState(
++                taskInfo.taskId,
++                state,
++                restoreBounds,
++                TaskWindowStateSource.ANDROID_FRAMEWORK,
++                nextGeneration.getAndIncrement(),
++            )
++        }
++    }
++
++    private fun publishCurrentState(
++        taskInfo: RunningTaskInfo,
++        source: Int = TaskWindowStateSource.ANDROID_FRAMEWORK,
++        generation: Long = nextGeneration.getAndIncrement(),
++        force: Boolean = false,
++    ) {
++        val repository = userRepositories.getProfile(taskInfo.userId)
++        val state = getCurrentState(taskInfo)
++        val taskBounds = taskInfo.configuration.windowConfiguration.bounds
++        val restoreBounds =
++            when (state) {
++                TaskWindowState.MAXIMIZED ->
++                    repository.getBoundsBeforeMaximize(taskInfo.taskId) ?: taskBounds
++                TaskWindowState.MINIMIZED -> taskBounds
++                else -> Rect()
++            }
++        publishState(
++            taskInfo.taskId,
++            state,
++            restoreBounds,
++            source,
++            generation,
++            force,
++        )
++    }
++
++    private fun getCurrentState(taskInfo: RunningTaskInfo): Int {
++        val repository = userRepositories.getProfile(taskInfo.userId)
++        if (repository.isMinimizedTask(taskInfo.taskId)) return TaskWindowState.MINIMIZED
++        val displayLayout = displayController.getDisplayLayout(taskInfo.displayId)
++        return if (
++            repository.getBoundsBeforeMaximize(taskInfo.taskId) != null ||
++                (displayLayout != null && isTaskMaximized(taskInfo, displayLayout))
++        ) {
++            TaskWindowState.MAXIMIZED
++        } else {
++            TaskWindowState.NORMAL
++        }
++    }
++
++    private fun publishState(
++        taskId: Int,
++        state: Int,
++        restoreBounds: Rect,
++        source: Int,
++        generation: Long,
++        force: Boolean = false,
++    ) {
++        val snapshot = StateSnapshot(state, Rect(restoreBounds))
++        if (!force && lastPublishedByTaskId[taskId] == snapshot) return
++        val service = ensureService()
++        if (service == null) {
++            scheduleReconnect()
++            return
++        }
++        val bounds =
++            TaskWindowBounds().apply {
++                left = restoreBounds.left
++                top = restoreBounds.top
++                right = restoreBounds.right
++                bottom = restoreBounds.bottom
++            }
++        try {
++            if (service.setTaskWindowState(taskId, state, bounds, source, generation)) {
++                lastPublishedByTaskId[taskId] = snapshot
++                if (source == TaskWindowStateSource.HOST) {
++                    pendingHostRequestByTaskId.remove(taskId)
++                }
++            } else {
++                Slog.w(TAG, "Waydroid rejected task=$taskId state=$state gen=$generation")
++            }
++        } catch (e: RemoteException) {
++            Slog.w(TAG, "Failed to publish task=$taskId state=$state", e)
++            waydroidWindow = null
++            lastPublishedByTaskId.clear()
++            scheduleReconnect()
++        }
++    }
++
++    private fun ensureService(): IWaydroidWindow? {
++        waydroidWindow?.let { return it }
++        return try {
++            val service = IWaydroidWindow.getService(false)
++            if (!service.linkToDeath(deathRecipient, DEATH_COOKIE)) {
++                Slog.w(TAG, "Failed to link Waydroid window state death recipient")
++                null
++            } else if (!service.registerTaskWindowCallback(callback)) {
++                Slog.w(TAG, "Failed to register Waydroid window state callback")
++                null
++            } else {
++                lastPublishedByTaskId.clear()
++                waydroidWindow = service
++                service
++            }
++        } catch (e: NoSuchElementException) {
++            null
++        } catch (e: RemoteException) {
++            Slog.w(TAG, "Failed to connect Waydroid window state service", e)
++            null
++        }
++    }
++
++    private fun scheduleReconnect() {
++        if (reconnectScheduled) return
++        reconnectScheduled = true
++        mainExecutor.executeDelayed(
++            {
++                reconnectScheduled = false
++                if (ensureService() == null) scheduleReconnect()
++            },
++            RECONNECT_DELAY_MS,
++        )
++    }
++
++    private companion object {
++        const val TAG = "WaydroidTaskWindowState"
++        const val DEATH_COOKIE = 0x57494E44L
++        const val RECONNECT_DELAY_MS = 2_000L
++    }
++}
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/data/DesktopRepository.kt b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/data/DesktopRepository.kt
+index a7e083c18a63..a0cd53e867c0 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/data/DesktopRepository.kt
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/data/DesktopRepository.kt
+@@ -1187,6 +1187,10 @@ class DesktopRepository(
+     fun removeBoundsBeforeMaximize(taskId: Int): Rect? =
+         boundsBeforeMaximizeByTaskId.removeReturnOld(taskId)
+ 
++    /** Returns a copy of the bounds saved before maximizing the given task. */
++    fun getBoundsBeforeMaximize(taskId: Int): Rect? =
++        boundsBeforeMaximizeByTaskId.get(taskId)?.let(::Rect)
++
+     /** Saves the bounds of the given task before maximizing. */
+     fun saveBoundsBeforeMaximize(taskId: Int, bounds: Rect) =
+         boundsBeforeMaximizeByTaskId.set(taskId, Rect(bounds))
+-- 
+2.43.0
+

@@ -1,0 +1,43 @@
+From ff84690609ba4aedfa719541ccb75d7c0ddd7c8a Mon Sep 17 00:00:00 2001
+From: xinyang <xinyang@localhost>
+Date: Fri, 7 Aug 2026 03:12:32 +0000
+Subject: [PATCH] =?UTF-8?q?=E5=A3=B0=E6=98=8E=20Waydroid=20=E7=AA=97?=
+ =?UTF-8?q?=E5=8F=A3=20HAL=201.3?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ manifest_framework.xml | 2 +-
+ manifest_waydroid.xml  | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/manifest_framework.xml b/manifest_framework.xml
+index 8b81eaa..a989a20 100644
+--- a/manifest_framework.xml
++++ b/manifest_framework.xml
+@@ -90,7 +90,7 @@
+     <hal format="hidl" optional="true">
+         <name>vendor.waydroid.window</name>
+         <transport>hwbinder</transport>
+-        <version>1.2</version>
++        <version>1.3</version>
+         <interface>
+             <name>IWaydroidWindow</name>
+             <instance>default</instance>
+diff --git a/manifest_waydroid.xml b/manifest_waydroid.xml
+index 88438d1..576d75e 100644
+--- a/manifest_waydroid.xml
++++ b/manifest_waydroid.xml
+@@ -47,7 +47,7 @@ IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+     <hal format="hidl">
+         <name>vendor.waydroid.window</name>
+         <transport>hwbinder</transport>
+-        <version>1.2</version>
++        <version>1.3</version>
+         <interface>
+             <name>IWaydroidWindow</name>
+             <instance>default</instance>
+-- 
+2.43.0
+

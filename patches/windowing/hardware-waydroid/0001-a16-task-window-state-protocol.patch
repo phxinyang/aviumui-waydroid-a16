@@ -1,0 +1,741 @@
+From 36f34e5f0ae8b92ac9c6cd730a0904384dd465ea Mon Sep 17 00:00:00 2001
+From: xinyang <xinyang@localhost>
+Date: Fri, 7 Aug 2026 03:12:31 +0000
+Subject: [PATCH] =?UTF-8?q?=E5=AE=9E=E7=8E=B0=20A16=20task=20=E7=AA=97?=
+ =?UTF-8?q?=E5=8F=A3=E7=8A=B6=E6=80=81=E5=8D=8F=E8=AE=AE?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ hwcomposer/Android.bp                         |   1 +
+ hwcomposer/WaydroidWindow.cpp                 | 106 ++++++++++
+ hwcomposer/WaydroidWindow.h                   |  19 +-
+ hwcomposer/hwcomposer.cpp                     |  18 +-
+ hwcomposer/wayland-hwc.cpp                    | 199 +++++++++++++++++-
+ hwcomposer/wayland-hwc.h                      |  60 ++++++
+ interfaces/window/1.3/Android.bp              |  19 ++
+ interfaces/window/1.3/IWaydroidWindow.hal     |  22 ++
+ .../window/1.3/IWaydroidWindowCallback.hal    |  18 ++
+ interfaces/window/1.3/types.hal               |  30 +++
+ 10 files changed, 480 insertions(+), 12 deletions(-)
+ create mode 100644 interfaces/window/1.3/Android.bp
+ create mode 100644 interfaces/window/1.3/IWaydroidWindow.hal
+ create mode 100644 interfaces/window/1.3/IWaydroidWindowCallback.hal
+ create mode 100644 interfaces/window/1.3/types.hal
+
+diff --git a/hwcomposer/Android.bp b/hwcomposer/Android.bp
+index f057bda..6b56a94 100644
+--- a/hwcomposer/Android.bp
++++ b/hwcomposer/Android.bp
+@@ -37,6 +37,7 @@ cc_library_shared {
+         "vendor.waydroid.window@1.0",
+         "vendor.waydroid.window@1.1",
+         "vendor.waydroid.window@1.2",
++        "vendor.waydroid.window@1.3",
+     ],
+     static_libs: [
+         "libwayland_client_static",
+diff --git a/hwcomposer/WaydroidWindow.cpp b/hwcomposer/WaydroidWindow.cpp
+index f45bc81..04e09a7 100644
+--- a/hwcomposer/WaydroidWindow.cpp
++++ b/hwcomposer/WaydroidWindow.cpp
+@@ -29,6 +29,10 @@ namespace vendor::waydroid::window::implementation {
+ WaydroidWindow::WaydroidWindow(struct display *display)
+     : mDisplay(display)
+ {
++    mDisplay->set_task_window_state_notifier(
++            [this](const task_command& command) {
++                return notifyTaskWindowState(command);
++            });
+ }
+ 
+ static const struct zwp_relative_pointer_v1_listener relative_pointer_listener = {
+@@ -151,4 +155,106 @@ Return<void> WaydroidWindow::setIdleInhibit(const hidl_string& task, bool enable
+     return Void();
+ }
+ 
++// Methods from ::vendor::waydroid::window::V1_3::IWaydroidWindow follow.
++Return<bool> WaydroidWindow::registerTaskWindowCallback(
++        const sp<IWaydroidWindowCallback>& callback) {
++    if (callback == nullptr)
++        return false;
++    {
++        std::scoped_lock lock(mTaskWindowCallbackMutex);
++        mTaskWindowCallback = callback;
++    }
++    mDisplay->enqueue_task_window_state_query(0);
++    return true;
++}
++
++Return<bool> WaydroidWindow::setTaskWindowState(uint32_t taskID,
++        TaskWindowState state, const TaskWindowBounds& restoreBounds,
++        TaskWindowStateSource source, uint64_t generation) {
++    task_window_state_update update;
++    update.task_id = taskID;
++    update.restore_bounds = {restoreBounds.left, restoreBounds.top,
++            restoreBounds.right, restoreBounds.bottom};
++    update.generation = generation;
++    switch (state) {
++        case TaskWindowState::NORMAL:
++            update.state = waydroid_task_window_state::Normal;
++            break;
++        case TaskWindowState::MAXIMIZED:
++            update.state = waydroid_task_window_state::Maximized;
++            break;
++        case TaskWindowState::MINIMIZED:
++            update.state = waydroid_task_window_state::Minimized;
++            break;
++        case TaskWindowState::FULL_UI:
++            update.state = waydroid_task_window_state::FullUi;
++            break;
++        default:
++            return false;
++    }
++    switch (source) {
++        case TaskWindowStateSource::ANDROID_FRAMEWORK:
++            update.source = waydroid_task_window_state_source::Android;
++            break;
++        case TaskWindowStateSource::HOST:
++            update.source = waydroid_task_window_state_source::Host;
++            break;
++        case TaskWindowStateSource::RECONCILE:
++            update.source = waydroid_task_window_state_source::Reconcile;
++            break;
++        default:
++            return false;
++    }
++    return mDisplay->queue_task_window_state(update);
++}
++
++bool WaydroidWindow::notifyTaskWindowState(const task_command& command) {
++    sp<IWaydroidWindowCallback> callback;
++    {
++        std::scoped_lock lock(mTaskWindowCallbackMutex);
++        callback = mTaskWindowCallback;
++    }
++    if (callback == nullptr)
++        return false;
++
++    Return<void> result;
++    if (command.type == task_command_type::WindowStateQuery) {
++        result = callback->queryTaskWindowState(command.task_id);
++    } else if (command.type == task_command_type::WindowStateRequest) {
++        TaskWindowBounds bounds;
++        bounds.left = command.window_bounds.left;
++        bounds.top = command.window_bounds.top;
++        bounds.right = command.window_bounds.right;
++        bounds.bottom = command.window_bounds.bottom;
++        TaskWindowState state = TaskWindowState::NORMAL;
++        switch (command.window_state) {
++            case waydroid_task_window_state::Normal:
++                state = TaskWindowState::NORMAL;
++                break;
++            case waydroid_task_window_state::Maximized:
++                state = TaskWindowState::MAXIMIZED;
++                break;
++            case waydroid_task_window_state::Minimized:
++                state = TaskWindowState::MINIMIZED;
++                break;
++            case waydroid_task_window_state::FullUi:
++                state = TaskWindowState::FULL_UI;
++                break;
++        }
++        result = callback->requestTaskWindowState(command.task_id, state,
++                bounds, command.generation);
++    } else {
++        return false;
++    }
++    if (result.isOk())
++        return true;
++    ALOGE("task-window callback failed: %s", result.description().c_str());
++    {
++        std::scoped_lock lock(mTaskWindowCallbackMutex);
++        if (mTaskWindowCallback == callback)
++            mTaskWindowCallback = nullptr;
++    }
++    return false;
++}
++
+ }  // namespace vendor::waydroid::window::implementation
+diff --git a/hwcomposer/WaydroidWindow.h b/hwcomposer/WaydroidWindow.h
+index 8e7592c..42f63a1 100644
+--- a/hwcomposer/WaydroidWindow.h
++++ b/hwcomposer/WaydroidWindow.h
+@@ -16,7 +16,8 @@
+ 
+ #pragma once
+ 
+-#include <vendor/waydroid/window/1.2/IWaydroidWindow.h>
++#include <vendor/waydroid/window/1.3/IWaydroidWindow.h>
++#include <vendor/waydroid/window/1.3/IWaydroidWindowCallback.h>
+ #include <hidl/MQDescriptor.h>
+ #include <hidl/Status.h>
+ 
+@@ -31,8 +32,12 @@ using ::android::hardware::hidl_vec;
+ using ::android::hardware::Return;
+ using ::android::hardware::Void;
+ using ::android::sp;
++using V1_3::IWaydroidWindowCallback;
++using V1_3::TaskWindowBounds;
++using V1_3::TaskWindowState;
++using V1_3::TaskWindowStateSource;
+ 
+-struct WaydroidWindow : public V1_2::IWaydroidWindow {
++struct WaydroidWindow : public V1_3::IWaydroidWindow {
+   public:
+     WaydroidWindow(struct display *display);
+     // Methods from ::vendor::waydroid::window::V1_0::IWaydroidWindow follow.
+@@ -43,8 +48,18 @@ struct WaydroidWindow : public V1_2::IWaydroidWindow {
+ 
+     // Methods from ::vendor::waydroid::window::V1_2::IWaydroidWindow follow.
+     Return<void> setIdleInhibit(const hidl_string& packageName, bool enabled) override;
++
++    // Methods from ::vendor::waydroid::window::V1_3::IWaydroidWindow follow.
++    Return<bool> registerTaskWindowCallback(
++            const sp<IWaydroidWindowCallback>& callback) override;
++    Return<bool> setTaskWindowState(uint32_t taskID, TaskWindowState state,
++            const TaskWindowBounds& restoreBounds,
++            TaskWindowStateSource source, uint64_t generation) override;
+   private:
++    bool notifyTaskWindowState(const task_command& command);
+     struct display *mDisplay;
++    std::mutex mTaskWindowCallbackMutex;
++    sp<IWaydroidWindowCallback> mTaskWindowCallback;
+ };
+ 
+ }  // namespace vendor::waydroid::window::implementation
+diff --git a/hwcomposer/hwcomposer.cpp b/hwcomposer/hwcomposer.cpp
+index e8abcb7..b53dba8 100644
+--- a/hwcomposer/hwcomposer.cpp
++++ b/hwcomposer/hwcomposer.cpp
+@@ -61,7 +61,7 @@ using ::android::hardware::joinRpcThreadpool;
+ 
+ using ::vendor::waydroid::display::V1_2::IWaydroidDisplay;
+ using ::vendor::waydroid::display::V1_2::implementation::WaydroidDisplay;
+-using ::vendor::waydroid::window::V1_1::IWaydroidWindow;
++using ::vendor::waydroid::window::V1_3::IWaydroidWindow;
+ using ::vendor::waydroid::window::implementation::WaydroidWindow;
+ using ::vendor::waydroid::clipboard::V1_0::IWaydroidClipboard;
+ using ::vendor::waydroid::clipboard::implementation::WaydroidClipboard;
+@@ -475,6 +475,21 @@ static void process_pending_task_configures(waydroid_hwc_composer_device_1 *pdev
+     }
+ }
+ 
++static void process_pending_task_window_states(
++        waydroid_hwc_composer_device_1 *pdev) {
++    const auto updates = pdev->display->take_pending_task_window_states();
++    for (const auto &update : updates) {
++        for (auto &[id, window] : pdev->display->windows) {
++            uint32_t task_id = 0;
++            if (window->get_numeric_task_id(&task_id)
++                    && task_id == update.task_id) {
++                window->apply_task_window_state(update);
++                break;
++            }
++        }
++    }
++}
++
+ static int hwc_set(struct hwc_composer_device_1* dev,size_t numDisplays,
+                    hwc_display_contents_1_t** displays) {
+     if (HWC_DISPLAY_PRIMARY >= numDisplays || !displays)
+@@ -496,6 +511,7 @@ static int hwc_set(struct hwc_composer_device_1* dev,size_t numDisplays,
+     mode->cleanup_stale_windows(pdev, contents);
+ 
+     reset_per_commit_state_window(pdev);
++    process_pending_task_window_states(pdev);
+     process_pending_task_configures(pdev);
+ 
+     bool found_cursor = false;
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+index 3a7c9ba..ca16ad8 100644
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -207,21 +207,46 @@ do_hotplug(struct display *display) {
+ static void
+ xdg_toplevel_handle_configure(void *data, struct xdg_toplevel *,
+                               int32_t width, int32_t height,
+-                              struct wl_array *)
++                              struct wl_array *states)
+ {
+     struct window *window = (struct window *)data;
+     std::scoped_lock callback_lock(window->toplevel_callback_mutex);
+     struct display *display = window->display;
+ 
++    if (window->taskID != "0" && window->taskID != "none") {
++        auto configured_state = waydroid_task_window_state::Normal;
++        bool activated = false;
++        const auto *state_data = static_cast<const uint32_t *>(states->data);
++        for (size_t i = 0; i < states->size / sizeof(*state_data); ++i) {
++            const uint32_t state = state_data[i];
++            if (state == XDG_TOPLEVEL_STATE_ACTIVATED)
++                activated = true;
++            if (state == XDG_TOPLEVEL_STATE_MAXIMIZED
++                    || state == XDG_TOPLEVEL_STATE_FULLSCREEN) {
++                configured_state = waydroid_task_window_state::Maximized;
++                break;
++            }
++        }
++        if (window->observe_task_window_state(configured_state, activated)) {
++            uint32_t task_id = 0;
++            if (window->get_numeric_task_id(&task_id)) {
++                display->enqueue_task_window_state_request(task_id,
++                        configured_state,
++                        {window->task_left, window->task_top,
++                         window->task_right, window->task_bottom});
++            }
++        }
++        if (!window->host_task_window_state_request_pending
++                && width > 1 && height > 1) {
++            window->queue_task_configure(width, height);
++        }
++        return;
++    }
++
+     if (width <= 1 || height <= 1) {
+ 		/* Compositor is deferring to us */
+         /* or invalid during calibration */
+ 		return;
+-	}
+-
+-    if (window->taskID != "0" && window->taskID != "none") {
+-        window->queue_task_configure(width, height);
+-        return;
+     }
+ 
+     display->req_width = width;
+@@ -584,6 +609,61 @@ void window::handle_task_configure(int32_t width, int32_t height) {
+             task_left + physical_width, task_top + physical_height);
+ }
+ 
++void window::apply_task_window_state(const task_window_state_update &update) {
++    requested_task_window_state = update.state;
++    requested_task_window_generation = update.generation;
++    if (update.source == waydroid_task_window_state_source::Host)
++        host_task_window_state_request_pending = false;
++    switch (update.state) {
++        case waydroid_task_window_state::Normal:
++            set_maximize(false);
++            task_window_state_ack_pending = xdg_toplevel != nullptr;
++            break;
++        case waydroid_task_window_state::Maximized:
++            set_maximize(true);
++            task_window_state_ack_pending = xdg_toplevel != nullptr;
++            break;
++        case waydroid_task_window_state::Minimized:
++            minimize();
++            observed_task_window_state = waydroid_task_window_state::Minimized;
++            task_window_state_ack_pending = false;
++            break;
++        case waydroid_task_window_state::FullUi:
++            if (taskID == "0")
++                set_maximize(true);
++            task_window_state_ack_pending = false;
++            break;
++    }
++    ALOGI("task %s applies window state=%u source=%u generation=%" PRIu64,
++            taskID.c_str(), static_cast<uint32_t>(update.state),
++            static_cast<uint32_t>(update.source), update.generation);
++}
++
++bool window::observe_task_window_state(waydroid_task_window_state state,
++        bool activated) {
++    if (task_window_state_ack_pending && state == requested_task_window_state) {
++        observed_task_window_state = state;
++        task_window_state_ack_pending = false;
++        ALOGI("task %s acks window state=%u generation=%" PRIu64,
++                taskID.c_str(), static_cast<uint32_t>(state),
++                requested_task_window_generation);
++        return false;
++    }
++    if (state == observed_task_window_state)
++        return false;
++    // xdg-shell has no minimized state.  Some compositors send an
++    // unactivated normal configure while honoring set_minimized(); only an
++    // activated configure is evidence that the host restored the window.
++    if (observed_task_window_state == waydroid_task_window_state::Minimized
++            && state == waydroid_task_window_state::Normal && !activated) {
++        return false;
++    }
++    observed_task_window_state = state;
++    task_window_state_ack_pending = false;
++    host_task_window_state_request_pending = true;
++    return true;
++}
++
+ void window::set_maximize(bool enabled) {
+     if (xdg_toplevel) {
+         if (enabled) {
+@@ -2622,8 +2702,12 @@ wayland_log_handler (const char *format, va_list args)
+     LOG_PRI_VA (ANDROID_LOG_ERROR, "wayland-hwc", format, args);
+ }
+ 
+-static bool execute_task_command(
++static bool execute_task_command(struct display *display,
+         sp<IWaydroidTask> &task, const task_command &command) {
++    if (command.type == task_command_type::WindowStateRequest
++            || command.type == task_command_type::WindowStateQuery) {
++        return display->notify_task_window_state(command);
++    }
+     if (task == nullptr)
+         task = IWaydroidTask::getService();
+     if (task == nullptr) {
+@@ -2655,6 +2739,9 @@ static bool execute_task_command(
+                         command.task_id, command.generation);
+             return true;
+         }
++        case task_command_type::WindowStateRequest:
++        case task_command_type::WindowStateQuery:
++            break;
+     }
+     return true;
+ }
+@@ -2677,7 +2764,7 @@ static void *task_command_worker(void *data) {
+         }
+         bool completed = false;
+         for (int attempt = 0; attempt < 2 && !completed; ++attempt) {
+-            completed = execute_task_command(task, command);
++            completed = execute_task_command(display, task, command);
+             if (!completed)
+                 task = nullptr;
+         }
+@@ -2746,6 +2833,18 @@ static uint64_t enqueue_task_command(struct display *display,
+                     }), commands.end());
+         } else if (command.type == task_command_type::RemoveAll) {
+             commands.clear();
++        } else if (command.type == task_command_type::WindowStateRequest) {
++            commands.erase(std::remove_if(commands.begin(), commands.end(),
++                    [&](const task_command &queued) {
++                        return queued.type == task_command_type::WindowStateRequest
++                                && queued.task_id == command.task_id;
++                    }), commands.end());
++        } else if (command.type == task_command_type::WindowStateQuery) {
++            commands.erase(std::remove_if(commands.begin(), commands.end(),
++                    [&](const task_command &queued) {
++                        return queued.type == task_command_type::WindowStateQuery
++                                && queued.task_id == command.task_id;
++                    }), commands.end());
+         }
+         commands.push_back(command);
+     }
+@@ -2786,6 +2885,80 @@ uint64_t display::enqueue_task_resize(uint32_t task_id, int32_t left,
+     return enqueue_task_command(this, command);
+ }
+ 
++uint64_t display::enqueue_task_window_state_request(uint32_t task_id,
++        waydroid_task_window_state state, const task_window_bounds &bounds) {
++    task_command command;
++    command.type = task_command_type::WindowStateRequest;
++    command.task_id = task_id;
++    command.window_state = state;
++    command.window_bounds = bounds;
++    return enqueue_task_command(this, command);
++}
++
++uint64_t display::enqueue_task_window_state_query(uint32_t task_id) {
++    task_command command;
++    command.type = task_command_type::WindowStateQuery;
++    command.task_id = task_id;
++    return enqueue_task_command(this, command);
++}
++
++bool display::queue_task_window_state(const task_window_state_update &update) {
++    if (update.generation == 0
++            || (update.task_id == 0
++                && update.state != waydroid_task_window_state::FullUi)
++            || (update.task_id != 0
++                && update.state == waydroid_task_window_state::FullUi)) {
++        return false;
++    }
++    {
++        std::scoped_lock lock(task_window_state_mutex);
++        pending_task_window_states[update.task_id] = update;
++        task_window_states[update.task_id] = update;
++    }
++    if (procs && procs->invalidate)
++        procs->invalidate(procs);
++    return true;
++}
++
++std::vector<task_window_state_update>
++display::take_pending_task_window_states() {
++    std::vector<task_window_state_update> updates;
++    std::scoped_lock lock(task_window_state_mutex);
++    updates.reserve(pending_task_window_states.size());
++    for (const auto &[task_id, update] : pending_task_window_states) {
++        updates.push_back(update);
++    }
++    pending_task_window_states.clear();
++    return updates;
++}
++
++bool display::get_task_window_state(uint32_t task_id,
++        task_window_state_update *update) {
++    if (!update)
++        return false;
++    std::scoped_lock lock(task_window_state_mutex);
++    const auto it = task_window_states.find(task_id);
++    if (it == task_window_states.end())
++        return false;
++    *update = it->second;
++    return true;
++}
++
++void display::set_task_window_state_notifier(
++        std::function<bool(const task_command &)> notifier) {
++    std::scoped_lock lock(task_window_state_mutex);
++    task_window_state_notifier = std::move(notifier);
++}
++
++bool display::notify_task_window_state(const task_command &command) {
++    std::function<bool(const task_command &)> notifier;
++    {
++        std::scoped_lock lock(task_window_state_mutex);
++        notifier = task_window_state_notifier;
++    }
++    return notifier && notifier(command);
++}
++
+ static void retired_windows_sync_done(void *data, struct wl_callback *callback,
+         uint32_t) {
+     auto *display = static_cast<struct display *>(data);
+@@ -2839,9 +3012,17 @@ void open_windows::retire(std::unique_ptr<window> retired) {
+ window *open_windows::add(waydroid_hwc_composer_device_1 *pdev, const std::string& key, const std::string& aid, const std::string& tid, hwc_color_t color, const hwc_rect_t *task_bounds) {
+     window *window = nullptr;
+     update([&](){
++        auto created = window::create(pdev->display, pdev->should_compose,
++                aid, tid, color, task_bounds);
++        uint32_t task_id = 0;
++        task_window_state_update state;
++        if (created && created->get_numeric_task_id(&task_id)
++                && pdev->display->get_task_window_state(task_id, &state)) {
++            created->apply_task_window_state(state);
++        }
+         auto res = windows.emplace(
+             key,
+-            window::create(pdev->display, pdev->should_compose, aid, tid, color, task_bounds)
++            std::move(created)
+         );
+         assert(res.second);
+         window = res.first->second.get();
+diff --git a/hwcomposer/wayland-hwc.h b/hwcomposer/wayland-hwc.h
+index 4348a4e..61756ac 100644
+--- a/hwcomposer/wayland-hwc.h
++++ b/hwcomposer/wayland-hwc.h
+@@ -105,11 +105,42 @@ enum class input_sequence_owner {
+     Wayland,
+ };
+ 
++enum class waydroid_task_window_state : uint32_t {
++    Normal = 0,
++    Maximized = 1,
++    Minimized = 2,
++    FullUi = 3,
++};
++
++enum class waydroid_task_window_state_source : uint32_t {
++    Android = 0,
++    Host = 1,
++    Reconcile = 2,
++};
++
++struct task_window_bounds {
++    int32_t left = 0;
++    int32_t top = 0;
++    int32_t right = 0;
++    int32_t bottom = 0;
++};
++
++struct task_window_state_update {
++    uint32_t task_id = 0;
++    waydroid_task_window_state state = waydroid_task_window_state::Normal;
++    task_window_bounds restore_bounds;
++    waydroid_task_window_state_source source =
++            waydroid_task_window_state_source::Android;
++    uint64_t generation = 0;
++};
++
+ enum class task_command_type {
+     Focus,
+     Remove,
+     RemoveAll,
+     Resize,
++    WindowStateRequest,
++    WindowStateQuery,
+ };
+ 
+ struct task_command {
+@@ -120,6 +151,9 @@ struct task_command {
+     int32_t right = 0;
+     int32_t bottom = 0;
+     int32_t resize_mode = 0;
++    waydroid_task_window_state window_state =
++            waydroid_task_window_state::Normal;
++    task_window_bounds window_bounds;
+     uint64_t generation = 0;
+ };
+ 
+@@ -247,6 +281,13 @@ struct window {
+     int last_task_resize_width = -1;
+     int last_task_resize_height = -1;
+     std::atomic<uint64_t> pending_task_configure_size{0};
++    waydroid_task_window_state observed_task_window_state =
++            waydroid_task_window_state::Normal;
++    waydroid_task_window_state requested_task_window_state =
++            waydroid_task_window_state::Normal;
++    bool task_window_state_ack_pending = false;
++    bool host_task_window_state_request_pending = false;
++    uint64_t requested_task_window_generation = 0;
+ 
+     // Synchronizes callback completion with window destruction without
+     // taking display::windowsMutex during a blocking roundtrip.
+@@ -272,6 +313,9 @@ struct window {
+     void queue_task_configure(int32_t width, int32_t height);
+     bool take_task_configure(int32_t *width, int32_t *height);
+     void handle_task_configure(int32_t width, int32_t height);
++    void apply_task_window_state(const task_window_state_update &update);
++    bool observe_task_window_state(waydroid_task_window_state state,
++            bool activated);
+ 
+     void minimize();
+     void set_maximize(bool enabled);
+@@ -484,6 +528,22 @@ struct display {
+     uint64_t enqueue_task_resize(uint32_t task_id, int32_t left,
+             int32_t top, int32_t right, int32_t bottom,
+             int32_t resize_mode);
++    uint64_t enqueue_task_window_state_request(uint32_t task_id,
++            waydroid_task_window_state state,
++            const task_window_bounds &bounds);
++    uint64_t enqueue_task_window_state_query(uint32_t task_id);
++
++    std::mutex task_window_state_mutex;
++    std::map<uint32_t, task_window_state_update> pending_task_window_states;
++    std::map<uint32_t, task_window_state_update> task_window_states;
++    std::function<bool(const task_command &)> task_window_state_notifier;
++    bool queue_task_window_state(const task_window_state_update &update);
++    std::vector<task_window_state_update> take_pending_task_window_states();
++    bool get_task_window_state(uint32_t task_id,
++            task_window_state_update *update);
++    void set_task_window_state_notifier(
++            std::function<bool(const task_command &)> notifier);
++    bool notify_task_window_state(const task_command &command);
+ 
+     const hwc_procs_t *procs;
+     bool needHotplug;
+diff --git a/interfaces/window/1.3/Android.bp b/interfaces/window/1.3/Android.bp
+new file mode 100644
+index 0000000..d77e745
+--- /dev/null
++++ b/interfaces/window/1.3/Android.bp
+@@ -0,0 +1,19 @@
++// This file is autogenerated by hidl-gen -Landroidbp.
++
++hidl_interface {
++    name: "vendor.waydroid.window@1.3",
++    root: "vendor.waydroid",
++    system_ext_specific: true,
++    srcs: [
++        "types.hal",
++        "IWaydroidWindow.hal",
++        "IWaydroidWindowCallback.hal",
++    ],
++    interfaces: [
++        "android.hidl.base@1.0",
++        "vendor.waydroid.window@1.0",
++        "vendor.waydroid.window@1.1",
++        "vendor.waydroid.window@1.2",
++    ],
++    gen_java: true,
++}
+diff --git a/interfaces/window/1.3/IWaydroidWindow.hal b/interfaces/window/1.3/IWaydroidWindow.hal
+new file mode 100644
+index 0000000..e4f0c85
+--- /dev/null
++++ b/interfaces/window/1.3/IWaydroidWindow.hal
+@@ -0,0 +1,22 @@
++/*
++ * Copyright (C) 2026 The Waydroid Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ */
++package vendor.waydroid.window@1.3;
++
++import @1.2::IWaydroidWindow;
++import IWaydroidWindowCallback;
++
++interface IWaydroidWindow extends @1.2::IWaydroidWindow {
++    registerTaskWindowCallback(IWaydroidWindowCallback callback)
++            generates (bool registered);
++
++    setTaskWindowState(uint32_t taskID, TaskWindowState state,
++            TaskWindowBounds restoreBounds, TaskWindowStateSource source,
++            uint64_t generation) generates (bool accepted);
++};
+diff --git a/interfaces/window/1.3/IWaydroidWindowCallback.hal b/interfaces/window/1.3/IWaydroidWindowCallback.hal
+new file mode 100644
+index 0000000..f6e1d51
+--- /dev/null
++++ b/interfaces/window/1.3/IWaydroidWindowCallback.hal
+@@ -0,0 +1,18 @@
++/*
++ * Copyright (C) 2026 The Waydroid Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ */
++package vendor.waydroid.window@1.3;
++
++interface IWaydroidWindowCallback {
++    oneway requestTaskWindowState(uint32_t taskID, TaskWindowState state,
++            TaskWindowBounds bounds, uint64_t generation);
++
++    /** taskID 0 asks the framework to republish every running desktop task. */
++    oneway queryTaskWindowState(uint32_t taskID);
++};
+diff --git a/interfaces/window/1.3/types.hal b/interfaces/window/1.3/types.hal
+new file mode 100644
+index 0000000..26c03d7
+--- /dev/null
++++ b/interfaces/window/1.3/types.hal
+@@ -0,0 +1,30 @@
++/*
++ * Copyright (C) 2026 The Waydroid Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ */
++package vendor.waydroid.window@1.3;
++
++enum TaskWindowState : uint32_t {
++    NORMAL = 0,
++    MAXIMIZED = 1,
++    MINIMIZED = 2,
++    FULL_UI = 3,
++};
++
++enum TaskWindowStateSource : uint32_t {
++    ANDROID_FRAMEWORK = 0,
++    HOST = 1,
++    RECONCILE = 2,
++};
++
++struct TaskWindowBounds {
++    int32_t left;
++    int32_t top;
++    int32_t right;
++    int32_t bottom;
++};
+-- 
+2.43.0
+
