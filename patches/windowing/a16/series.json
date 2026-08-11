@@ -4,7 +4,7 @@
     {
       "path": "frameworks/base",
       "base_tree": "4af36c9bec5cc91b8ace1361731b74e4be18b363",
-      "expected_tree": "fc76ac448c603a93e9db7c2f60576b3fc2dea334",
+      "expected_tree": "c0fcc8dead049dc1381a1ad98095c07465ac8808",
       "patches": [
         {
           "path": "a16/frameworks-base/0001-wm-per-task-host-window-routing.patch",
@@ -24,7 +24,7 @@
         },
         {
           "path": "a16/frameworks-base/0005-wm-nonhost-default-launch-fullscreen.patch",
-          "sha256": "6b39c9e3320b2e25c4dfe2c22222a57e7da9f3ac22a9aaf7bd7e82be182debaa"
+          "sha256": "e75ce864baf9b2dd209d89e395b1b1eb7f3f863ab12603beae2dd5baf668232c"
         }
       ]
     },
