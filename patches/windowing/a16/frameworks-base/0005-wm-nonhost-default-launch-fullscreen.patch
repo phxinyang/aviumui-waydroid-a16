@@ -30,7 +30,7 @@ index c4437d316415fd81bc882648fd6bba06edbb8631..3f4a5b6c7d8e9f0a1b2c3d4e5f607182
  import static android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN;
  import static android.app.WindowConfiguration.WINDOWING_MODE_PINNED;
  import static android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED;
-@@ -1969,14 +1969,37 @@ private void updateWaydroidHostWindowRoute(ActivityRecord started) {
+@@ -1969,14 +1969,38 @@ private void updateWaydroidHostWindowRoute(ActivityRecord started) {
          final boolean trustedHostLaunch = hasTrustedWaydroidHostWindowCookie();
 -        final boolean routeToHostWindow = task.getDisplayId() == DEFAULT_DISPLAY
 +        final boolean defaultDisplay = task.getDisplayId() == DEFAULT_DISPLAY;
@@ -64,7 +64,8 @@ index c4437d316415fd81bc882648fd6bba06edbb8631..3f4a5b6c7d8e9f0a1b2c3d4e5f607182
 +            return;
 +        }
 +        final TaskDisplayArea taskDisplayArea = task.getDisplayArea();
-+        if (taskDisplayArea != null && !task.inFullscreenWindowingMode()) {
++        if (taskDisplayArea != null
++                && task.getWindowingMode() != WINDOWING_MODE_FULLSCREEN) {
 +            final Task rootTask = task.getRootTask();
 +            if (rootTask != null && rootTask != task
 +                    && rootTask.inFreeformWindowingMode()) {
