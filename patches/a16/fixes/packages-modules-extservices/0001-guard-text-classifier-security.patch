@@ -1,0 +1,39 @@
+From e0890062eac0049334478aa46c8b4a9dffae5828 Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Tue, 11 Aug 2026 04:19:11 +0000
+Subject: [PATCH] extservices-guard-text-classifier-security
+
+Change-Id: Id16adcb56340788f4e4c08fbb143c0cf734a19c0
+---
+ .../ext/services/notification/Assistant.java      | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/java/src/android/ext/services/notification/Assistant.java b/java/src/android/ext/services/notification/Assistant.java
+index ed8eec4c..7e099937 100644
+--- a/java/src/android/ext/services/notification/Assistant.java
++++ b/java/src/android/ext/services/notification/Assistant.java
+@@ -133,10 +133,17 @@ public class Assistant extends NotificationAssistantService {
+         mIsWatch = mPm.hasSystemFeature(FEATURE_WATCH);
+ 
+         TextClassificationManager tcm = getSystemService(TextClassificationManager.class);
+-        if (sUseTcForOtpDetection) {
+-            mTc = tcm.getClassifier(TextClassifier.CLASSIFIER_TYPE_ANDROID_DEFAULT);
+-        } else {
+-            mTc = tcm.getTextClassifier();
++        try {
++            if (sUseTcForOtpDetection) {
++                mTc = tcm.getClassifier(TextClassifier.CLASSIFIER_TYPE_ANDROID_DEFAULT);
++            } else {
++                mTc = tcm.getTextClassifier();
++            }
++        } catch (SecurityException e) {
++            // ACCESS_TEXT_CLASSIFIER_BY_TYPE is not defined in this build
++            // (aconfig flag off), so getClassifier throws. Degrade to NO_OP
++            // instead of crashing the notification assistant.
++            mTc = TextClassifier.NO_OP;
+         }
+     }
+ 
+-- 
+2.43.0
+

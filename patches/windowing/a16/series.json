@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "projects": [
+    {
+      "path": "frameworks/base",
+      "base_tree": "4af36c9bec5cc91b8ace1361731b74e4be18b363",
+      "expected_tree": "e9fcca7441e99a688eb3d44f2ccd7e12aa13385f",
+      "patches": [
+        {
+          "path": "a16/frameworks-base/0001-wm-per-task-host-window-routing.patch",
+          "sha256": "79bc8e50daf064362105544797f79e9534c96552296526a9701273c3d29d4887"
+        },
+        {
+          "path": "a16/frameworks-base/0002-wm-window-resize-and-context-races.patch",
+          "sha256": "f63efd0ee7f2b08d432d848af263b829dceef8bc44a951e7fe8bc696cfd4d544"
+        },
+        {
+          "path": "a16/frameworks-base/0003-wmtests-align-avium-a16-test-apis.patch",
+          "sha256": "ceaf574e0eaa1facd949c2c73b17b5156ee0a21824e9c6e4b6ed7f19aaaabe21"
+        },
+        {
+          "path": "a16/frameworks-base/0004-wmtests-cover-host-window-route-authentication.patch",
+          "sha256": "9c3baa6546a268e85a21d85f47f33baed63217691365c713973b66317204be42"
+        },
+        {
+          "path": "a16/frameworks-base/0005-wm-nonhost-default-launch-fullscreen.patch",
+          "sha256": "ddd299d7397d719b0040ad9cbe9f7531a73df18861d102519ecedb8754e20ba7"
+        }
+      ]
+    },
+    {
+      "path": "hardware/waydroid",
+      "base_tree": "62d1bbd926cc744ad8f080cfc91cbfdb9e915264",
+      "expected_tree": "4cf58c231c569d8ea1d7f7d82100934073c56211",
+      "patches": [
+        {
+          "path": "a16/hardware-waydroid/0001-framework-routed-hybrid-windows.patch",
+          "sha256": "4d78627185287608dbc907ec14245e147946825606faddeedf6f0906d9b5c457"
+        },
+        {
+          "path": "a16/hardware-waydroid/0002-log-task-window-route.patch",
+          "sha256": "33197d4fa6cefe2b6107f25c1749b70192cf1afe6c6e1dc91c03e901b30795a9"
+        }
+      ]
+    },
+    {
+      "path": "lineage-sdk",
+      "base_tree": "c4afffe3db5fbf82b06b81ec2b7081c7d7bead8f",
+      "expected_tree": "e54bb39086f24fdf360f585a5c4c9e09853901be",
+      "patches": [
+        {
+          "path": "a16/lineage-sdk/0001-host-launch-cookie.patch",
+          "sha256": "2be038ef54cd8bbcf4f307e9c9619394cb3d8b894488e18c36cf9bc720576998"
+        }
+      ]
+    },
+    {
+      "path": "device/waydroid/waydroid",
+      "base_tree": "f43124e5a78e22040202b6ad3b93d4e94de95608",
+      "expected_tree": "295b321687bd26ab4a2efd6afe667aadfacd4abd",
+      "patches": [
+        {
+          "path": "device-waydroid/0001-window-hal-1.3.patch",
+          "sha256": "194dd610aeee60c00257c29173ee4d24ad40816ef6f02b02b0e5b1ace3e888d3"
+        },
+        {
+          "path": "device-waydroid/0002-install-boot-image-profile.patch",
+          "sha256": "f5c583ed6e26dbbfce5e746354095b6912648b41aa10e62b08b2da09109caa50"
+        },
+        {
+          "path": "device-waydroid/0003-arm64-allocator-and-mapper-selection.patch",
+          "sha256": "1d33326b787e3ab302825fedf33d3a97e6a7322c229d092990240c1743b6e783"
+        }
+      ]
+    }
+  ]
+}

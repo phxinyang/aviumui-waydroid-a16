@@ -1,0 +1,85 @@
+From 87e12d7cb881c27be10e70b2eb295bbb733a7aac Mon Sep 17 00:00:00 2001
+From: xinyang <xinyang@localhost>
+Date: Mon, 10 Aug 2026 19:31:50 +0000
+Subject: [PATCH 2/2] wmtests: cover Waydroid host window route authentication
+
+Change-Id: Iac60bd5ba9e1bb75d3d34887fa22b7e4d46876b9
+---
+ .../server/wm/ActivityStarterTests.java       | 64 +++++++++++++++++++
+ 1 file changed, 64 insertions(+)
+
+diff --git a/services/tests/wmtests/src/com/android/server/wm/ActivityStarterTests.java b/services/tests/wmtests/src/com/android/server/wm/ActivityStarterTests.java
+index 6d59fe5b21bd..62f8b740d212 100644
+--- a/services/tests/wmtests/src/com/android/server/wm/ActivityStarterTests.java
++++ b/services/tests/wmtests/src/com/android/server/wm/ActivityStarterTests.java
+@@ -1630,6 +1630,70 @@ public class ActivityStarterTests extends WindowTestsBase {
+         assertTrue(mRootWindowContainer.topRunningActivity().mLaunchCookie == newCookie);
+     }
+ 
++    @Test
++    public void testWaydroidHostWindowRoute_trustedSystemCookie() {
++        final ActivityStarter starter = prepareStarter(FLAG_ACTIVITY_NEW_TASK, false);
++        new ActivityBuilder(mAtm).setCreateTask(true).build();
++        final ActivityOptions options = ActivityOptions.makeBasic();
++        final Binder cookie = new Binder("com.avium.waydroid.launch.HOST_WINDOW");
++        options.setLaunchCookie(cookie);
++        final Intent intent = new Intent();
++        intent.setComponent(ActivityBuilder.getDefaultComponent());
++
++        starter.setReason("testWaydroidHostWindowRoute_trustedSystemCookie")
++                .setIntent(intent)
++                .setCallingUid(SYSTEM_UID)
++                .setActivityOptions(options.toBundle(), Binder.getCallingPid(), SYSTEM_UID)
++                .execute();
++
++        assertTrue(mRootWindowContainer.topRunningActivity().mLaunchCookie == cookie);
++        assertTrue(mRootWindowContainer.topRunningActivity().getTask()
++                .isWaydroidHostWindow());
++    }
++
++    @Test
++    public void testWaydroidHostWindowRoute_rejectsWrongDescriptor() {
++        final ActivityStarter starter = prepareStarter(FLAG_ACTIVITY_NEW_TASK, false);
++        new ActivityBuilder(mAtm).setCreateTask(true).build();
++        final ActivityOptions options = ActivityOptions.makeBasic();
++        final Binder cookie = new Binder("com.example.NOT_A_HOST_WINDOW");
++        options.setLaunchCookie(cookie);
++        final Intent intent = new Intent();
++        intent.setComponent(ActivityBuilder.getDefaultComponent());
++
++        starter.setReason("testWaydroidHostWindowRoute_rejectsWrongDescriptor")
++                .setIntent(intent)
++                .setCallingUid(SYSTEM_UID)
++                .setActivityOptions(options.toBundle(), Binder.getCallingPid(), SYSTEM_UID)
++                .execute();
++
++        assertTrue(mRootWindowContainer.topRunningActivity().mLaunchCookie == cookie);
++        assertFalse(mRootWindowContainer.topRunningActivity().getTask()
++                .isWaydroidHostWindow());
++    }
++
++    @Test
++    public void testWaydroidHostWindowRoute_rejectsNonSystemCaller() {
++        final ActivityStarter starter = prepareStarter(FLAG_ACTIVITY_NEW_TASK, false);
++        new ActivityBuilder(mAtm).setCreateTask(true).build();
++        final ActivityOptions options = ActivityOptions.makeBasic();
++        final Binder cookie = new Binder("com.avium.waydroid.launch.HOST_WINDOW");
++        options.setLaunchCookie(cookie);
++        final Intent intent = new Intent();
++        intent.setComponent(ActivityBuilder.getDefaultComponent());
++
++        starter.setReason("testWaydroidHostWindowRoute_rejectsNonSystemCaller")
++                .setIntent(intent)
++                .setCallingUid(DEFAULT_FAKE_UID)
++                .setActivityOptions(
++                        options.toBundle(), Binder.getCallingPid(), DEFAULT_FAKE_UID)
++                .execute();
++
++        assertTrue(mRootWindowContainer.topRunningActivity().mLaunchCookie == cookie);
++        assertFalse(mRootWindowContainer.topRunningActivity().getTask()
++                .isWaydroidHostWindow());
++    }
++
+     @Test
+     public void testRemoteAnimation_appliesToExistingTask() {
+         final ActivityStarter starter = prepareStarter(0, false);

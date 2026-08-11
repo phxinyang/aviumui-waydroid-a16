@@ -1,0 +1,53 @@
+From 295b321687bd26ab4a2efd6afe667aadfacd4abd Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Wed, 12 Aug 2026 00:00:00 +0000
+Subject: [PATCH] device/waydroid: select ARM64 graphics allocator packages
+
+On ARM64 Waydroid targets (e.g. Qualcomm tablets) the minigbm_dmabuf
+IAllocator service cannot initialize and must not claim the
+@4.0::IAllocator/default interface. Keep its mapper/gralloc libraries,
+but serve @4.0::IAllocator/default from the minigbm_gbm_mesa service.
+
+diff --git a/device.mk b/device.mk
+index 33126e0..b45fd20 100644
+--- a/device.mk
++++ b/device.mk
+@@ -109,12 +109,30 @@ PRODUCT_PACKAGES += \
+ ifneq ($(TARGET_USE_MESA),false)
+ 
+ ifeq ($(filter %_waydroid_x86 %_waydroid_x86_64 %_waydroid_tv_x86 %_waydroid_tv_x86_64,$(TARGET_PRODUCT)),)
++ifneq ($(filter %_waydroid_arm64 %_waydroid_arm64_only %_waydroid_tv_arm64 %_waydroid_tv_arm64_only,$(TARGET_PRODUCT)),)
++# ARM64 Waydroid hosts (e.g. Qualcomm tablets): the minigbm_dmabuf
++# IAllocator service cannot initialize and must not claim the
++# @4.0::IAllocator/default interface; keep its mapper/gralloc libs.
++PRODUCT_PACKAGES += \
++    android.hardware.graphics.mapper@4.0-impl.minigbm_dmabuf \
++    gralloc.minigbm_dmabuf
++else
+ PRODUCT_PACKAGES += \
+     android.hardware.graphics.allocator@4.0-service.minigbm_dmabuf \
+     android.hardware.graphics.mapper@4.0-impl.minigbm_dmabuf \
+     gralloc.minigbm_dmabuf
+ endif
++endif
+ 
++ifneq ($(filter %_waydroid_arm64 %_waydroid_arm64_only %_waydroid_tv_arm64 %_waydroid_tv_arm64_only,$(TARGET_PRODUCT)),)
++# ARM64 Waydroid: only minigbm_gbm_mesa serves @4.0::IAllocator/default.
++PRODUCT_PACKAGES += \
++    android.hardware.graphics.allocator@4.0-service.minigbm_gbm_mesa \
++    android.hardware.graphics.mapper@4.0-impl.minigbm \
++    android.hardware.graphics.mapper@4.0-impl.minigbm_gbm_mesa \
++    gralloc.minigbm \
++    gralloc.minigbm_gbm_mesa
++else
+ PRODUCT_PACKAGES += \
+     android.hardware.graphics.allocator@4.0-service.minigbm \
+     android.hardware.graphics.allocator@4.0-service.minigbm_gbm_mesa \
+@@ -122,6 +140,7 @@ PRODUCT_PACKAGES += \
+     android.hardware.graphics.mapper@4.0-impl.minigbm_gbm_mesa \
+     gralloc.minigbm \
+     gralloc.minigbm_gbm_mesa
++endif
+ 
+ PRODUCT_PACKAGES += \
+     dri_gbm \

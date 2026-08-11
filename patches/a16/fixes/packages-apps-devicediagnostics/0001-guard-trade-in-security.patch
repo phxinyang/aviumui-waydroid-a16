@@ -1,0 +1,41 @@
+From c72310ff6507f2134dc9ce8c18f233dcd347633f Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Tue, 11 Aug 2026 04:19:11 +0000
+Subject: [PATCH] devicediagnostics-guard-trade-in-security
+
+Change-Id: Ib7fce43b81fc21cc558265c289d8096a14046d7f
+---
+ .../devicediagnostics/BootCompleteReceiver.kt    | 16 +++++++++++-----
+ 1 file changed, 11 insertions(+), 5 deletions(-)
+
+diff --git a/DeviceDiagnosticsLib/src/main/java/com/android/devicediagnostics/BootCompleteReceiver.kt b/DeviceDiagnosticsLib/src/main/java/com/android/devicediagnostics/BootCompleteReceiver.kt
+index 4c3e38f..972b250 100644
+--- a/DeviceDiagnosticsLib/src/main/java/com/android/devicediagnostics/BootCompleteReceiver.kt
++++ b/DeviceDiagnosticsLib/src/main/java/com/android/devicediagnostics/BootCompleteReceiver.kt
+@@ -28,12 +28,18 @@ import com.android.tradeinmode.flags.Flags.enableTradeInMode
+ class BootCompleteReceiver : BroadcastReceiver() {
+     override fun onReceive(context: Context, intent: Intent) {
+         if (!enableTradeInMode()) return
+-        var b: IBinder? = ServiceManager.getService("tradeinmode")
+-        if (b != null) {
+-            var service: ITradeInMode = ITradeInMode.Stub.asInterface(b)
+-            if (service.start()) {
+-                Slog.i("BootCompleteReceiver", "Entered trade-in mode.")
++        try {
++            var b: IBinder? = ServiceManager.getService("tradeinmode")
++            if (b != null) {
++                var service: ITradeInMode = ITradeInMode.Stub.asInterface(b)
++                if (service.start()) {
++                    Slog.i("BootCompleteReceiver", "Entered trade-in mode.")
++                }
+             }
++        } catch (e: SecurityException) {
++            // ENTER_TRADE_IN_MODE is not defined in this build (aconfig flag
++            // off), so service.start() throws. Skip rather than crash.
++            Slog.w("BootCompleteReceiver", "Unable to enter trade-in mode", e)
+         }
+     }
+ }
+-- 
+2.43.0
+

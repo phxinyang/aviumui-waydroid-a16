@@ -1,0 +1,1400 @@
+From 6b13f9e031e2f2fa1a1acec76a9ef76ddbca73fa Mon Sep 17 00:00:00 2001
+From: Avium Window Reproducer <avium-window-reproducer@example.invalid>
+Date: Tue, 11 Aug 2026 01:10:00 +0800
+Subject: [PATCH] wm: add authenticated per-task Waydroid host windows
+
+Change-Id: Iabe42f1d88e004eac8fe5f26254875619f272b73
+---
+ core/java/android/app/TaskInfo.java           |  13 +
+ core/java/android/view/SurfaceView.java       |  31 +-
+ libs/WindowManager/Shell/Android.bp           |   1 +
+ .../desktopmode/DesktopTasksController.kt     |  66 ++
+ .../WaydroidTaskWindowStateBridge.kt          | 649 ++++++++++++++++++
+ .../desktopmode/data/DesktopRepository.kt     |   4 +
+ .../SplashscreenContentDrawer.java            |   2 +-
+ .../startingsurface/TaskSnapshotWindow.java   |   6 +-
+ .../DesktopModeWindowDecorViewModel.java      | 101 ++-
+ .../shell/windowdecor/WindowDecoration.java   |  15 +-
+ .../android/server/wm/ActivityStarter.java    |  46 ++
+ .../core/java/com/android/server/wm/Task.java |  31 +
+ .../server/wm/WindowStateAnimator.java        |   6 +
+ .../src/com/android/server/wm/TaskTests.java  |  13 +
+ 14 files changed, 962 insertions(+), 22 deletions(-)
+ create mode 100644 libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt
+
+diff --git a/core/java/android/app/TaskInfo.java b/core/java/android/app/TaskInfo.java
+index 6c71a2b377a2..236fb6248e69 100644
+--- a/core/java/android/app/TaskInfo.java
++++ b/core/java/android/app/TaskInfo.java
+@@ -308,6 +308,15 @@ public class TaskInfo {
+      */
+     public ArrayList<IBinder> launchCookies = new ArrayList<>();
+ 
++    /**
++     * Whether this task was explicitly launched as a Waydroid host window.
++     *
++     * <p>This is task state, not a launch-cookie heuristic. WindowManager persists the value and
++     * only changes it after validating the launch source.</p>
++     * @hide
++     */
++    public boolean isWaydroidHostWindow;
++
+     /**
+      * The identifier of the parent task that is created by organizer, otherwise
+      * {@link ActivityTaskManager#INVALID_TASK_ID}.
+@@ -572,6 +581,7 @@ public class TaskInfo {
+                 && appCompatTaskInfo.equalsForTaskOrganizer(that.appCompatTaskInfo)
+                 && Objects.equals(topActivityMainWindowFrame, that.topActivityMainWindowFrame)
+                 && isAppBubble == that.isAppBubble
++                && isWaydroidHostWindow == that.isWaydroidHostWindow
+                 && minWidth == that.minWidth && minHeight == that.minHeight;
+     }
+ 
+@@ -633,6 +643,7 @@ public class TaskInfo {
+         minHeight = source.readInt();
+         defaultMinSize = source.readInt();
+         source.readBinderList(launchCookies);
++        isWaydroidHostWindow = source.readBoolean();
+         positionInParent = source.readTypedObject(Point.CREATOR);
+         parentTaskId = source.readInt();
+         isFocused = source.readBoolean();
+@@ -691,6 +702,7 @@ public class TaskInfo {
+         dest.writeInt(minHeight);
+         dest.writeInt(defaultMinSize);
+         dest.writeBinderList(launchCookies);
++        dest.writeBoolean(isWaydroidHostWindow);
+         dest.writeTypedObject(positionInParent, flags);
+         dest.writeInt(parentTaskId);
+         dest.writeBoolean(isFocused);
+@@ -740,6 +752,7 @@ public class TaskInfo {
+                 + " displayCutoutSafeInsets=" + displayCutoutInsets
+                 + " topActivityInfo=" + topActivityInfo
+                 + " launchCookies=" + launchCookies
++                + " isWaydroidHostWindow=" + isWaydroidHostWindow
+                 + " positionInParent=" + positionInParent
+                 + " parentTaskId=" + parentTaskId
+                 + " isFocused=" + isFocused
+diff --git a/core/java/android/view/SurfaceView.java b/core/java/android/view/SurfaceView.java
+index 49a7da2d88ed..3b235166c886 100644
+--- a/core/java/android/view/SurfaceView.java
++++ b/core/java/android/view/SurfaceView.java
+@@ -30,8 +30,11 @@ import android.annotation.IntDef;
+ import android.annotation.NonNull;
+ import android.annotation.Nullable;
+ import android.annotation.SuppressLint;
++import android.app.Activity;
+ import android.compat.annotation.UnsupportedAppUsage;
++import android.content.ComponentName;
+ import android.content.Context;
++import android.content.ContextWrapper;
+ import android.content.res.CompatibilityInfo.Translator;
+ import android.graphics.BLASTBufferQueue;
+ import android.graphics.BlendMode;
+@@ -1374,8 +1377,30 @@ public class SurfaceView extends View implements ViewRootImpl.SurfaceChangedCall
+                 final Transaction surfaceUpdateTransaction = new Transaction();
+                 if (creating) {
+                     updateOpaqueFlag();
+-                    final String name = Integer.toHexString(System.identityHashCode(this))
+-                            + " SurfaceView[" + viewRoot.getTitle().toString() + "]";
++                    final String surfaceTag =
++                            Integer.toHexString(System.identityHashCode(this))
++                                    + " SurfaceView";
++                    String name = surfaceTag + "["
++                            + viewRoot.getTitle().toString() + "]";
++                    Context context = getContext();
++                    for (int depth = 0; depth < 16
++                            && context instanceof ContextWrapper
++                            && !(context instanceof Activity); depth++) {
++                        final Context baseContext =
++                                ((ContextWrapper) context).getBaseContext();
++                        if (baseContext == context) break;
++                        context = baseContext;
++                    }
++                    if (context instanceof Activity) {
++                        final Activity activity = (Activity) context;
++                        final int taskId = activity.getTaskId();
++                        final ComponentName component = activity.getComponentName();
++                        if (taskId >= 0 && component != null) {
++                            name = "TID:" + taskId + "#"
++                                    + component.getPackageName() + "/"
++                                    + component.getClassName() + "#" + surfaceTag;
++                        }
++                    }
+                     createBlastSurfaceControls(viewRoot, name, surfaceUpdateTransaction);
+                 } else if (mSurfaceControl == null) {
+                     return;
+@@ -1671,7 +1696,7 @@ public class SurfaceView extends View implements ViewRootImpl.SurfaceChangedCall
+ 
+         if (mBackgroundControl == null) {
+             mBackgroundControl = new SurfaceControl.Builder()
+-                    .setName("Background for " + name)
++                    .setName(name + "$Background")
+                     .setLocalOwnerView(this)
+                     .setOpaque(true)
+                     .setColorLayer()
+diff --git a/libs/WindowManager/Shell/Android.bp b/libs/WindowManager/Shell/Android.bp
+index 34d3f4773273..94778625f1d3 100644
+--- a/libs/WindowManager/Shell/Android.bp
++++ b/libs/WindowManager/Shell/Android.bp
+@@ -173,6 +173,7 @@ android_library {
+         "lottie",
+         "mechanics",
+         "perfetto_trace_java_protos",
++        "vendor.waydroid.window-V1.3-java",
+     ],
+     libs: [
+         // Soong fails to automatically add this dependency because all the
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt
+index b6fd5fc459a5..fc99e1a019da 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt
+@@ -311,6 +311,7 @@ class DesktopTasksController(
+ 
+     private lateinit var splitScreenController: SplitScreenController
+     lateinit var freeformTaskTransitionStarter: FreeformTaskTransitionStarter
++    private lateinit var waydroidTaskWindowStateBridge: WaydroidTaskWindowStateBridge
+     // Launch cookie used to identify a drag and drop transition to fullscreen after it has begun.
+     // Used to prevent handleRequest from moving the new fullscreen task to freeform.
+     private var dragAndDropFullscreenCookie: Binder? = null
+@@ -326,6 +327,14 @@ class DesktopTasksController(
+ 
+     init {
+         desktopMode = DesktopModeImpl()
++        waydroidTaskWindowStateBridge =
++            WaydroidTaskWindowStateBridge(
++                shellTaskOrganizer,
++                displayController,
++                userRepositories,
++                mainExecutor,
++                this,
++            )
+         if (desktopState.canEnterDesktopMode) {
+             shellInit.addInitCallback({ onInit() }, this)
+         }
+@@ -343,6 +352,7 @@ class DesktopTasksController(
+ 
+     private fun onInit() {
+         logD("onInit")
++        waydroidTaskWindowStateBridge.start()
+         shellCommandHandler.addDumpCallback(this::dump, this)
+         shellCommandHandler.addCommandCallback("desktopmode", desktopModeShellCommandHandler, this)
+         shellController.addExternalInterface(
+@@ -1908,6 +1918,9 @@ class DesktopTasksController(
+                 excludeTaskId = taskId,
+             )
+         )
++        if (!isMinimizingToPip) {
++            waydroidTaskWindowStateBridge.onTaskMinimized(taskInfo)
++        }
+     }
+ 
+     /**
+@@ -2859,6 +2872,11 @@ class DesktopTasksController(
+             wct,
+             interaction.animationStartBounds,
+         )
++        waydroidTaskWindowStateBridge.onTaskSizeToggled(
++            taskInfo,
++            maximized = willMaximize,
++            restoreBounds = if (willMaximize) currentTaskBounds else destinationBounds,
++        )
+     }
+ 
+     private fun dragToMaximizeDesktopTask(
+@@ -3540,6 +3558,12 @@ class DesktopTasksController(
+             logV("skipping handleRequest reason=%s", "triggerTask is null")
+             return null
+         }
++        if (!triggerTask.isWaydroidHostWindow) {
++            // Avium full UI and MiFreeform keep their native task policy even
++            // while host-routed desktop tasks are present on the same device.
++            logV("skipping handleRequest reason=%s", "not a Waydroid host-window task")
++            return null
++        }
+         val recentsAnimationRunning =
+             RecentsTransitionStateListener.isAnimating(recentsTransitionState)
+         val shouldHandleMidRecentsFreeformLaunch =
+@@ -3603,6 +3627,13 @@ class DesktopTasksController(
+             return null
+         }
+ 
++        if (triggerTask.isWaydroidHostWindow) {
++            logV(
++                "Waydroid host-window route taskId=%d windowingMode=%d",
++                triggerTask.taskId,
++                triggerTask.windowingMode,
++            )
++        }
+         val result =
+             when {
+                 triggerTask.activityType == ACTIVITY_TYPE_HOME ->
+@@ -3615,6 +3646,8 @@ class DesktopTasksController(
+                 // Check if the closing task needs to be handled
+                 TransitionUtil.isClosingType(request.type) ->
+                     handleTaskClosing(triggerTask, transition, request.type)
++                triggerTask.isWaydroidHostWindow ->
++                    handleWaydroidHostWindowTaskLaunch(triggerTask, transition, request.type)
+                 // Check if the top task shouldn't be allowed to enter desktop mode
+                 isIncompatibleTask(triggerTask) ->
+                     handleIncompatibleTaskLaunch(triggerTask, transition)
+@@ -4040,6 +4073,23 @@ class DesktopTasksController(
+         )
+     }
+ 
++    private fun handleWaydroidHostWindowTaskLaunch(
++        task: RunningTaskInfo,
++        transition: IBinder,
++        @WindowManager.TransitionType requestType: Int,
++    ): WindowContainerTransaction? {
++        if (keyguardManager.isKeyguardLocked) return null
++        return handleFreeformTaskPlacement(
++            task = task,
++            transition = transition,
++            targetDisplayId = task.displayId,
++            requestedTaskBounds = null,
++            requestType = requestType,
++            enterReason = EnterReason.APP_FREEFORM_INTENT,
++            forceDesktop = true,
++        )
++    }
++
+     private fun handleFreeformTaskLaunch(
+         task: RunningTaskInfo,
+         transition: IBinder,
+@@ -4081,6 +4131,7 @@ class DesktopTasksController(
+         requestedTaskBounds: Rect?,
+         @WindowManager.TransitionType requestType: Int,
+         enterReason: EnterReason,
++        forceDesktop: Boolean = false,
+     ): WindowContainerTransaction? {
+         val userId = task.userId
+         val repository = userRepositories.getProfile(userId)
+@@ -4129,6 +4180,8 @@ class DesktopTasksController(
+                 // If there is no desk on the target display, then it is not capable of handling
+                 // desktop tasks.
+                 targetDeskId == null -> false
++                // An explicit Waydroid desktop launch outranks relaunch heuristics.
++                forceDesktop -> true
+                 // If there is an active desk on the target display, then it is already in desktop
+                 // windowing so the new task should also be placed in desktop windowing.
+                 anyDeskActive -> true
+@@ -6386,6 +6439,19 @@ class DesktopTasksController(
+         }
+     }
+ 
++    /** Starts the host xdg grab chosen by AOSP's task positioner. */
++    fun beginWaydroidTaskWindowDrag(taskId: Int, ctrlType: Int): Boolean =
++        waydroidTaskWindowStateBridge.beginTaskWindowDrag(taskId, ctrlType)
++
++    /** Finishes a host resize through AOSP's standard drop transition. */
++    fun finishWaydroidTaskWindowResize(wct: WindowContainerTransaction) {
++        transitions.startTransition(
++            TRANSIT_CHANGE,
++            wct,
++            windowDragTransitionHandler,
++        )
++    }
++
+     /** Called when a task's info changes. */
+     fun onTaskInfoChanged(taskInfo: RunningTaskInfo) {
+         if (!DesktopModeFlags.ENABLE_FULLY_IMMERSIVE_IN_DESKTOP.isTrue) return
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt
+new file mode 100644
+index 000000000000..91b4b2681091
+--- /dev/null
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt
+@@ -0,0 +1,649 @@
++/*
++ * Copyright (C) 2026 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ */
++
++package com.android.wm.shell.desktopmode
++
++import android.app.ActivityManager.RunningTaskInfo
++import android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM
++import android.graphics.Rect
++import android.os.IHwBinder
++import android.os.RemoteException
++import android.util.Slog
++import android.view.Display.DEFAULT_DISPLAY
++import android.view.SurfaceControl
++import android.window.WindowContainerTransaction
++import com.android.wm.shell.ShellTaskOrganizer
++import com.android.wm.shell.common.DisplayController
++import com.android.wm.shell.common.ShellExecutor
++import com.android.wm.shell.desktopmode.DesktopModeEventLogger.Companion.InputMethod
++import com.android.wm.shell.desktopmode.DesktopModeEventLogger.Companion.MinimizeReason
++import com.android.wm.shell.desktopmode.DesktopModeEventLogger.Companion.UnminimizeReason
++import com.android.wm.shell.desktopmode.common.ToggleTaskSizeInteraction
++import java.util.NoSuchElementException
++import java.util.concurrent.atomic.AtomicLong
++import vendor.waydroid.window.V1_3.IWaydroidWindow
++import vendor.waydroid.window.V1_3.IWaydroidWindowCallback
++import vendor.waydroid.window.V1_3.TaskWindowBounds
++import vendor.waydroid.window.V1_3.TaskWindowState
++import vendor.waydroid.window.V1_3.TaskWindowStateSource
++
++/** Keeps Android desktop-task state and the host xdg-toplevel state in one task-ID protocol. */
++internal class WaydroidTaskWindowStateBridge(
++    private val shellTaskOrganizer: ShellTaskOrganizer,
++    private val displayController: DisplayController,
++    private val userRepositories: DesktopUserRepositories,
++    private val mainExecutor: ShellExecutor,
++    private val desktopTasksController: DesktopTasksController,
++) {
++    private data class StateSnapshot(val state: Int, val restoreBounds: Rect)
++
++    private data class RouteSnapshot(
++        val enabled: Boolean,
++        val displayId: Int,
++        val component: String,
++        val title: String,
++        val appId: String,
++    )
++
++    private data class HostRequest(val state: Int, val generation: Long)
++
++    private data class HostBoundsRequest(
++        val taskId: Int,
++        val bounds: Rect,
++        val dragResizing: Boolean,
++        val generation: Long,
++    )
++
++    private var waydroidWindow: IWaydroidWindow? = null
++    private var reconnectScheduled = false
++    private val nextGeneration = AtomicLong(1)
++    private val lastPublishedByTaskId = mutableMapOf<Int, StateSnapshot>()
++    private val lastPublishedRouteByTaskId = mutableMapOf<Int, RouteSnapshot>()
++    private val pendingHostRequestByTaskId = mutableMapOf<Int, HostRequest>()
++    private val hostBoundsLock = Any()
++    private val pendingHostBoundsByTaskId = mutableMapOf<Int, HostBoundsRequest>()
++    private var hostBoundsDrainScheduled = false
++    private val lastHostBoundsGenerationByTaskId = mutableMapOf<Int, Long>()
++    private val hostDragResizingTaskIds = mutableSetOf<Int>()
++
++    private val taskAppearedListener =
++        object : ShellTaskOrganizer.TaskAppearedListener {
++            override fun onTaskAppeared(taskInfo: RunningTaskInfo, leash: SurfaceControl) {
++                handleTaskInfo(taskInfo)
++            }
++        }
++
++    private val taskInfoChangedListener =
++        object : ShellTaskOrganizer.TaskInfoChangedListener {
++            override fun onTaskInfoChanged(taskInfo: RunningTaskInfo) {
++                handleTaskInfo(taskInfo)
++            }
++        }
++
++    private val taskVanishedListener =
++        object : ShellTaskOrganizer.TaskVanishedListener {
++            override fun onTaskVanished(taskInfo: RunningTaskInfo) {
++                revokeTaskRoute(taskInfo.taskId)
++            }
++        }
++
++    private val deathRecipient =
++        object : IHwBinder.DeathRecipient {
++            override fun serviceDied(cookie: Long) {
++                mainExecutor.execute {
++                    Slog.w(TAG, "Waydroid window state service died cookie=$cookie")
++                    waydroidWindow = null
++                    lastPublishedByTaskId.clear()
++                    lastPublishedRouteByTaskId.clear()
++                    lastHostBoundsGenerationByTaskId.clear()
++                    synchronized(hostBoundsLock) { pendingHostBoundsByTaskId.clear() }
++                    scheduleReconnect()
++                }
++            }
++        }
++
++    private val callback =
++        object : IWaydroidWindowCallback.Stub() {
++            override fun requestTaskWindowBounds(
++                taskID: Int,
++                bounds: TaskWindowBounds,
++                dragResizing: Boolean,
++                generation: Long,
++            ) {
++                enqueueHostBoundsRequest(
++                    HostBoundsRequest(
++                        taskId = taskID,
++                        bounds = Rect(bounds.left, bounds.top, bounds.right, bounds.bottom),
++                        dragResizing = dragResizing,
++                        generation = generation,
++                    )
++                )
++            }
++
++            override fun requestTaskWindowState(
++                taskID: Int,
++                state: Int,
++                bounds: TaskWindowBounds,
++                generation: Long,
++            ) {
++                mainExecutor.execute { handleHostRequest(taskID, state, generation) }
++            }
++
++            override fun queryTaskWindowState(taskID: Int) {
++                mainExecutor.execute { publishRequestedState(taskID) }
++            }
++        }
++
++    fun start() {
++        shellTaskOrganizer.addTaskAppearedListener(taskAppearedListener)
++        shellTaskOrganizer.addTaskInfoChangedListener(taskInfoChangedListener)
++        shellTaskOrganizer.addTaskVanishedListener(taskVanishedListener)
++        if (ensureService() == null) {
++            scheduleReconnect()
++        }
++    }
++
++    fun beginTaskWindowDrag(taskId: Int, ctrlType: Int): Boolean {
++        val horizontal = ctrlType and 0x3
++        val vertical = ctrlType and 0xc
++        if (taskId <= 0 || ctrlType and 0xf.inv() != 0 || horizontal == 0x3 ||
++            vertical == 0xc
++        ) {
++            Slog.w(TAG, "Rejecting malformed task drag task=$taskId ctrl=$ctrlType")
++            return false
++        }
++        val taskInfo = shellTaskOrganizer.getRunningTaskInfo(taskId)
++        if (taskInfo == null || !isHostWindowTask(taskInfo)) return false
++        val service = ensureService() ?: run {
++            scheduleReconnect()
++            return false
++        }
++        return try {
++            val accepted = service.beginTaskWindowDrag(taskId, ctrlType)
++            Slog.i(TAG, "TASK_XDG_GESTURE_REQUEST task=$taskId " +
++                "aosp_ctrl=$ctrlType accepted=${if (accepted) 1 else 0}")
++            accepted
++        } catch (e: RemoteException) {
++            Slog.w(TAG, "Failed to begin task drag task=$taskId ctrl=$ctrlType", e)
++            waydroidWindow = null
++            scheduleReconnect()
++            false
++        }
++    }
++
++    private fun handleTaskInfo(taskInfo: RunningTaskInfo) {
++        publishTaskRoute(taskInfo)
++        if (!isHostWindowTask(taskInfo) || taskInfo.windowingMode != WINDOWING_MODE_FREEFORM) {
++            hostDragResizingTaskIds.remove(taskInfo.taskId)
++            lastHostBoundsGenerationByTaskId.remove(taskInfo.taskId)
++            lastPublishedByTaskId.remove(taskInfo.taskId)
++            pendingHostRequestByTaskId.remove(taskInfo.taskId)
++            return
++        }
++        val pending = pendingHostRequestByTaskId[taskInfo.taskId]
++        if (pending == null) {
++            publishCurrentState(taskInfo)
++            return
++        }
++
++        val currentState = getCurrentState(taskInfo)
++        if (currentState == pending.state) {
++            publishCurrentState(
++                taskInfo,
++                source = TaskWindowStateSource.HOST,
++                generation = pending.generation,
++                force = true,
++            )
++            return
++        }
++
++        val repository = userRepositories.getProfile(taskInfo.userId)
++        if (
++            pending.state == TaskWindowState.MAXIMIZED &&
++                currentState == TaskWindowState.NORMAL &&
++                !repository.isMinimizedTask(taskInfo.taskId)
++        ) {
++            desktopTasksController.toggleDesktopTaskSize(
++                taskInfo,
++                ToggleTaskSizeInteraction(
++                    direction = ToggleTaskSizeInteraction.Direction.MAXIMIZE,
++                    source = ToggleTaskSizeInteraction.Source.KEYBOARD_SHORTCUT,
++                    inputMethod = InputMethod.MOUSE,
++                ),
++            )
++        }
++    }
++
++    private fun isHostWindowTask(taskInfo: RunningTaskInfo): Boolean =
++        taskInfo.isWaydroidHostWindow && taskInfo.displayId == DEFAULT_DISPLAY
++
++    private fun publishTaskRoute(taskInfo: RunningTaskInfo, force: Boolean = false) {
++        val enabled = isHostWindowTask(taskInfo)
++        val componentName =
++            taskInfo.topActivity ?: taskInfo.baseActivity ?: taskInfo.baseIntent.component
++        val appId = if (enabled) componentName?.packageName.orEmpty() else ""
++        val component = if (enabled) componentName?.flattenToShortString().orEmpty() else ""
++        val title =
++            if (enabled) {
++                taskInfo.taskDescription?.label?.toString()?.takeIf { it.isNotBlank() } ?: appId
++            } else {
++                ""
++            }
++        val route = RouteSnapshot(enabled, taskInfo.displayId, component, title, appId)
++        val previous = lastPublishedRouteByTaskId[taskInfo.taskId]
++        if (!force && previous == route) return
++        if (!enabled && previous?.enabled != true) return
++
++        val service = ensureService() ?: run {
++            scheduleReconnect()
++            return
++        }
++        try {
++            if (
++                service.setTaskWindowRoute(
++                    taskInfo.taskId,
++                    enabled,
++                    taskInfo.displayId,
++                    component,
++                    title,
++                    appId,
++                )
++            ) {
++                if (enabled) {
++                    lastPublishedRouteByTaskId[taskInfo.taskId] = route
++                } else {
++                    lastPublishedRouteByTaskId.remove(taskInfo.taskId)
++                }
++            } else {
++                Slog.w(TAG, "Waydroid rejected task route task=${taskInfo.taskId}")
++            }
++        } catch (e: RemoteException) {
++            Slog.w(TAG, "Failed to publish task route task=${taskInfo.taskId}", e)
++            waydroidWindow = null
++            lastPublishedRouteByTaskId.clear()
++            scheduleReconnect()
++        }
++    }
++
++    private fun revokeTaskRoute(taskId: Int) {
++        hostDragResizingTaskIds.remove(taskId)
++        lastHostBoundsGenerationByTaskId.remove(taskId)
++        lastPublishedByTaskId.remove(taskId)
++        pendingHostRequestByTaskId.remove(taskId)
++        synchronized(hostBoundsLock) { pendingHostBoundsByTaskId.remove(taskId) }
++
++        val service = ensureService() ?: run {
++            lastPublishedRouteByTaskId.remove(taskId)
++            scheduleReconnect()
++            return
++        }
++        try {
++            if (service.setTaskWindowRoute(taskId, false, DEFAULT_DISPLAY, "", "", "")) {
++                lastPublishedRouteByTaskId.remove(taskId)
++            }
++        } catch (e: RemoteException) {
++            Slog.w(TAG, "Failed to revoke task route task=$taskId", e)
++            waydroidWindow = null
++            lastPublishedRouteByTaskId.clear()
++            scheduleReconnect()
++        }
++    }
++
++    private fun reconcileTaskRoutes() {
++        shellTaskOrganizer.getRunningTasks().forEach { publishTaskRoute(it, force = true) }
++    }
++
++    fun onTaskMinimized(taskInfo: RunningTaskInfo) {
++        if (!isHostWindowTask(taskInfo)) return
++        publishRequestedAndroidState(
++            taskInfo,
++            TaskWindowState.MINIMIZED,
++            taskInfo.configuration.windowConfiguration.bounds,
++        )
++    }
++
++    fun onTaskSizeToggled(
++        taskInfo: RunningTaskInfo,
++        maximized: Boolean,
++        restoreBounds: Rect,
++    ) {
++        if (!isHostWindowTask(taskInfo)) return
++        publishRequestedAndroidState(
++            taskInfo,
++            if (maximized) TaskWindowState.MAXIMIZED else TaskWindowState.NORMAL,
++            if (maximized) restoreBounds else Rect(),
++        )
++    }
++
++    private fun enqueueHostBoundsRequest(request: HostBoundsRequest) {
++        if (
++            request.taskId <= 0 ||
++                request.generation <= 0 ||
++                request.bounds.width() <= 0 ||
++                request.bounds.height() <= 0
++        ) {
++            Slog.w(
++                TAG,
++                "Ignoring malformed host bounds task=${request.taskId} " +
++                    "bounds=${request.bounds} gen=${request.generation}",
++            )
++            return
++        }
++
++        var scheduleDrain = false
++        synchronized(hostBoundsLock) {
++            val pending = pendingHostBoundsByTaskId[request.taskId]
++            if (pending == null || request.generation > pending.generation) {
++                pendingHostBoundsByTaskId[request.taskId] = request
++            }
++            if (!hostBoundsDrainScheduled) {
++                hostBoundsDrainScheduled = true
++                scheduleDrain = true
++            }
++        }
++        if (scheduleDrain) mainExecutor.execute { drainHostBoundsRequests() }
++    }
++
++    private fun drainHostBoundsRequests() {
++        val requests =
++            synchronized(hostBoundsLock) {
++                val drained = pendingHostBoundsByTaskId.values.toList()
++                pendingHostBoundsByTaskId.clear()
++                hostBoundsDrainScheduled = false
++                drained
++            }
++        requests.forEach(::applyHostBoundsRequest)
++    }
++
++    private fun applyHostBoundsRequest(request: HostBoundsRequest) {
++        val lastGeneration = lastHostBoundsGenerationByTaskId[request.taskId] ?: 0
++        if (request.generation <= lastGeneration) return
++
++        val taskInfo = shellTaskOrganizer.getRunningTaskInfo(request.taskId)
++        if (
++            taskInfo == null || !isHostWindowTask(taskInfo) ||
++                taskInfo.windowingMode != WINDOWING_MODE_FREEFORM
++        ) {
++            hostDragResizingTaskIds.remove(request.taskId)
++            lastHostBoundsGenerationByTaskId[request.taskId] = request.generation
++            return
++        }
++
++        val currentBounds = taskInfo.configuration.windowConfiguration.bounds
++        val displayBounds = taskInfo.configuration.windowConfiguration.maxBounds
++        val requestedBounds = Rect(request.bounds)
++        if (!displayBounds.isEmpty) {
++            val width = requestedBounds.width()
++                .coerceAtLeast(1)
++                .coerceAtMost(displayBounds.width())
++            val height = requestedBounds.height()
++                .coerceAtLeast(1)
++                .coerceAtMost(displayBounds.height())
++            val left = requestedBounds.left.coerceIn(
++                displayBounds.left, displayBounds.right - width)
++            val top = requestedBounds.top.coerceIn(
++                displayBounds.top, displayBounds.bottom - height)
++            requestedBounds.set(left, top, left + width, top + height)
++        }
++        // Host resize END is authoritative even if the bounds did not change.
++        // Do not let the process-local mirror suppress setDragResizing(false):
++        // SystemUI or HWC can restart while WMS still owns a resize leash.
++        val wct = WindowContainerTransaction()
++        wct.setDragResizing(taskInfo.token, request.dragResizing)
++        if (currentBounds != requestedBounds) {
++            wct.setBounds(taskInfo.token, requestedBounds)
++        }
++        if (request.dragResizing) {
++            shellTaskOrganizer.applyTransaction(wct)
++        } else {
++            desktopTasksController.finishWaydroidTaskWindowResize(wct)
++        }
++        if (request.dragResizing) {
++            hostDragResizingTaskIds.add(request.taskId)
++        } else {
++            hostDragResizingTaskIds.remove(request.taskId)
++        }
++        lastHostBoundsGenerationByTaskId[request.taskId] = request.generation
++    }
++
++    private fun handleHostRequest(taskId: Int, state: Int, generation: Long) {
++        if (
++            taskId <= 0 ||
++                generation <= 0 ||
++                state !in
++                    setOf(
++                        TaskWindowState.NORMAL,
++                        TaskWindowState.MAXIMIZED,
++                        TaskWindowState.MINIMIZED,
++                    )
++        ) {
++            Slog.w(TAG, "Ignoring malformed host state task=$taskId state=$state gen=$generation")
++            return
++        }
++        val taskInfo = shellTaskOrganizer.getRunningTaskInfo(taskId) ?: return
++        if (!isHostWindowTask(taskInfo) || taskInfo.windowingMode != WINDOWING_MODE_FREEFORM) return
++        pendingHostRequestByTaskId[taskId] = HostRequest(state, generation)
++
++        val currentState = getCurrentState(taskInfo)
++        if (currentState == state) {
++            publishCurrentState(
++                taskInfo,
++                source = TaskWindowStateSource.HOST,
++                generation = generation,
++                force = true,
++            )
++            return
++        }
++
++        val repository = userRepositories.getProfile(taskInfo.userId)
++        when (state) {
++            TaskWindowState.MINIMIZED ->
++                desktopTasksController.minimizeTask(taskInfo, MinimizeReason.KEY_GESTURE)
++            TaskWindowState.NORMAL ->
++                if (repository.isMinimizedTask(taskId)) {
++                    desktopTasksController.moveTaskToFront(
++                        taskInfo,
++                        unminimizeReason = UnminimizeReason.UNKNOWN,
++                    )
++                } else {
++                    desktopTasksController.toggleDesktopTaskSize(
++                        taskInfo,
++                        ToggleTaskSizeInteraction(
++                            direction = ToggleTaskSizeInteraction.Direction.RESTORE,
++                            source = ToggleTaskSizeInteraction.Source.KEYBOARD_SHORTCUT,
++                            inputMethod = InputMethod.MOUSE,
++                        ),
++                    )
++                }
++            TaskWindowState.MAXIMIZED ->
++                if (repository.isMinimizedTask(taskId)) {
++                    desktopTasksController.moveTaskToFront(
++                        taskInfo,
++                        unminimizeReason = UnminimizeReason.UNKNOWN,
++                    )
++                } else {
++                    desktopTasksController.toggleDesktopTaskSize(
++                        taskInfo,
++                        ToggleTaskSizeInteraction(
++                            direction = ToggleTaskSizeInteraction.Direction.MAXIMIZE,
++                            source = ToggleTaskSizeInteraction.Source.KEYBOARD_SHORTCUT,
++                            inputMethod = InputMethod.MOUSE,
++                        ),
++                    )
++                }
++        }
++    }
++
++    private fun publishRequestedState(taskId: Int) {
++        val tasks =
++            if (taskId == 0) shellTaskOrganizer.getRunningTasks()
++            else listOfNotNull(shellTaskOrganizer.getRunningTaskInfo(taskId))
++        for (taskInfo in tasks) {
++            if (isHostWindowTask(taskInfo) && taskInfo.windowingMode == WINDOWING_MODE_FREEFORM) {
++                publishCurrentState(
++                    taskInfo,
++                    source = TaskWindowStateSource.RECONCILE,
++                    generation = nextGeneration.getAndIncrement(),
++                    force = true,
++                )
++            }
++        }
++    }
++
++    private fun publishRequestedAndroidState(
++        taskInfo: RunningTaskInfo,
++        state: Int,
++        restoreBounds: Rect,
++    ) {
++        val hostRequest = pendingHostRequestByTaskId[taskInfo.taskId]
++        if (hostRequest?.state == state) {
++            publishState(
++                taskInfo.taskId,
++                state,
++                restoreBounds,
++                TaskWindowStateSource.HOST,
++                hostRequest.generation,
++                force = true,
++            )
++        } else {
++            publishState(
++                taskInfo.taskId,
++                state,
++                restoreBounds,
++                TaskWindowStateSource.ANDROID_FRAMEWORK,
++                nextGeneration.getAndIncrement(),
++            )
++        }
++    }
++
++    private fun publishCurrentState(
++        taskInfo: RunningTaskInfo,
++        source: Int = TaskWindowStateSource.ANDROID_FRAMEWORK,
++        generation: Long = nextGeneration.getAndIncrement(),
++        force: Boolean = false,
++    ) {
++        val repository = userRepositories.getProfile(taskInfo.userId)
++        val state = getCurrentState(taskInfo)
++        val taskBounds = taskInfo.configuration.windowConfiguration.bounds
++        val restoreBounds =
++            when (state) {
++                TaskWindowState.MAXIMIZED ->
++                    repository.getBoundsBeforeMaximize(taskInfo.taskId) ?: taskBounds
++                TaskWindowState.MINIMIZED -> taskBounds
++                else -> Rect()
++            }
++        publishState(
++            taskInfo.taskId,
++            state,
++            restoreBounds,
++            source,
++            generation,
++            force,
++        )
++    }
++
++    private fun getCurrentState(taskInfo: RunningTaskInfo): Int {
++        val repository = userRepositories.getProfile(taskInfo.userId)
++        if (repository.isMinimizedTask(taskInfo.taskId)) return TaskWindowState.MINIMIZED
++        val displayLayout = displayController.getDisplayLayout(taskInfo.displayId)
++        return if (
++            repository.getBoundsBeforeMaximize(taskInfo.taskId) != null ||
++                (displayLayout != null && isTaskMaximized(taskInfo, displayLayout))
++        ) {
++            TaskWindowState.MAXIMIZED
++        } else {
++            TaskWindowState.NORMAL
++        }
++    }
++
++    private fun publishState(
++        taskId: Int,
++        state: Int,
++        restoreBounds: Rect,
++        source: Int,
++        generation: Long,
++        force: Boolean = false,
++    ) {
++        val snapshot = StateSnapshot(state, Rect(restoreBounds))
++        if (!force && lastPublishedByTaskId[taskId] == snapshot) return
++        val service = ensureService()
++        if (service == null) {
++            scheduleReconnect()
++            return
++        }
++        val bounds =
++            TaskWindowBounds().apply {
++                left = restoreBounds.left
++                top = restoreBounds.top
++                right = restoreBounds.right
++                bottom = restoreBounds.bottom
++            }
++        try {
++            if (service.setTaskWindowState(taskId, state, bounds, source, generation)) {
++                lastPublishedByTaskId[taskId] = snapshot
++                if (source == TaskWindowStateSource.HOST) {
++                    pendingHostRequestByTaskId.remove(taskId)
++                }
++            } else {
++                Slog.w(TAG, "Waydroid rejected task=$taskId state=$state gen=$generation")
++            }
++        } catch (e: RemoteException) {
++            Slog.w(TAG, "Failed to publish task=$taskId state=$state", e)
++            waydroidWindow = null
++            lastPublishedByTaskId.clear()
++            lastPublishedRouteByTaskId.clear()
++            scheduleReconnect()
++        }
++    }
++
++    private fun ensureService(): IWaydroidWindow? {
++        waydroidWindow?.let { return it }
++        return try {
++            val service = IWaydroidWindow.getService(false)
++            if (!service.linkToDeath(deathRecipient, DEATH_COOKIE)) {
++                Slog.w(TAG, "Failed to link Waydroid window state death recipient")
++                null
++            } else if (!service.registerTaskWindowCallback(callback)) {
++                Slog.w(TAG, "Failed to register Waydroid window state callback")
++                null
++            } else {
++                lastPublishedByTaskId.clear()
++                lastPublishedRouteByTaskId.clear()
++                lastHostBoundsGenerationByTaskId.clear()
++                waydroidWindow = service
++                mainExecutor.execute { reconcileTaskRoutes() }
++                service
++            }
++        } catch (e: NoSuchElementException) {
++            null
++        } catch (e: RemoteException) {
++            Slog.w(TAG, "Failed to connect Waydroid window state service", e)
++            null
++        }
++    }
++
++    private fun scheduleReconnect() {
++        if (reconnectScheduled) return
++        reconnectScheduled = true
++        mainExecutor.executeDelayed(
++            {
++                reconnectScheduled = false
++                if (ensureService() == null) scheduleReconnect()
++            },
++            RECONNECT_DELAY_MS,
++        )
++    }
++
++    private companion object {
++        const val TAG = "WaydroidTaskWindowState"
++        const val DEATH_COOKIE = 0x57494E44L
++        const val RECONNECT_DELAY_MS = 2_000L
++    }
++}
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/data/DesktopRepository.kt b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/data/DesktopRepository.kt
+index a7e083c18a63..a0cd53e867c0 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/data/DesktopRepository.kt
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/data/DesktopRepository.kt
+@@ -1187,6 +1187,10 @@ class DesktopRepository(
+     fun removeBoundsBeforeMaximize(taskId: Int): Rect? =
+         boundsBeforeMaximizeByTaskId.removeReturnOld(taskId)
+ 
++    /** Returns a copy of the bounds saved before maximizing the given task. */
++    fun getBoundsBeforeMaximize(taskId: Int): Rect? =
++        boundsBeforeMaximizeByTaskId.get(taskId)?.let(::Rect)
++
+     /** Saves the bounds of the given task before maximizing. */
+     fun saveBoundsBeforeMaximize(taskId: Int, bounds: Rect) =
+         boundsBeforeMaximizeByTaskId.set(taskId, Rect(bounds))
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/startingsurface/SplashscreenContentDrawer.java b/libs/WindowManager/Shell/src/com/android/wm/shell/startingsurface/SplashscreenContentDrawer.java
+index b4bb16d08af5..4140213358af 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/startingsurface/SplashscreenContentDrawer.java
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/startingsurface/SplashscreenContentDrawer.java
+@@ -293,7 +293,7 @@ public class SplashscreenContentDrawer {
+         params.token = appToken;
+         params.packageName = activityInfo.packageName;
+         params.privateFlags |= WindowManager.LayoutParams.SYSTEM_FLAG_SHOW_FOR_ALL_USERS;
+-        params.setTitle("Splash Screen " + title);
++        params.setTitle(activityInfo.packageName + "/SplashScreen");
+         return params;
+     }
+     /**
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/startingsurface/TaskSnapshotWindow.java b/libs/WindowManager/Shell/src/com/android/wm/shell/startingsurface/TaskSnapshotWindow.java
+index c203ddb616f0..8658ce7c8205 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/startingsurface/TaskSnapshotWindow.java
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/startingsurface/TaskSnapshotWindow.java
+@@ -60,7 +60,7 @@ import java.lang.ref.WeakReference;
+  */
+ public class TaskSnapshotWindow {
+     private static final String TAG = StartingWindowController.TAG;
+-    private static final String TITLE_FORMAT = "SnapshotStartingWindow for taskId=";
++    private static final String TITLE_FORMAT = "/SnapshotStartingWindow";
+ 
+     private final Window mWindow;
+     private final Runnable mClearWindowHandler;
+@@ -93,7 +93,9 @@ public class TaskSnapshotWindow {
+                 ? snapshot.getHardwareBufferFormat()
+                 : snapshot.getHardwareBuffer().getFormat();
+         final WindowManager.LayoutParams layoutParams = SnapshotDrawerUtils.createLayoutParameters(
+-                info, TITLE_FORMAT + taskId, TYPE_APPLICATION_STARTING,
++                info, (runningTaskInfo.baseActivity != null
++                        ? runningTaskInfo.baseActivity.getPackageName() : "?")
++                        + TITLE_FORMAT, TYPE_APPLICATION_STARTING,
+                 format, appToken);
+         if (layoutParams == null) {
+             Slog.e(TAG, "TaskSnapshotWindow no layoutParams");
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/DesktopModeWindowDecorViewModel.java b/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/DesktopModeWindowDecorViewModel.java
+index 52aa957a7ab0..e220998f5d12 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/DesktopModeWindowDecorViewModel.java
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/DesktopModeWindowDecorViewModel.java
+@@ -2158,6 +2158,60 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
+     }
+ 
+ 
++    static final class WaydroidTaskPositionerDecorator
++            extends AbstractTaskPositionerDecorator {
++        private final WindowDecorationWrapper mWindowDecoration;
++        private final DesktopTasksController mDesktopTasksController;
++        private final Rect mBoundsAtStart = new Rect();
++        private int mCtrlType;
++        private boolean mHandoffAttempted;
++        private boolean mHandoffAccepted;
++
++        WaydroidTaskPositionerDecorator(
++                WindowDecorationWrapper windowDecoration,
++                DesktopTasksController desktopTasksController,
++                TaskPositioner decoratedTaskPositioner) {
++            super(decoratedTaskPositioner);
++            mWindowDecoration = windowDecoration;
++            mDesktopTasksController = desktopTasksController;
++        }
++
++        @Override
++        public Rect onDragPositioningStart(int ctrlType, int displayId, float x, float y,
++                int inputMethodType) {
++            mCtrlType = ctrlType;
++            mHandoffAttempted = false;
++            mHandoffAccepted = false;
++            mBoundsAtStart.set(super.onDragPositioningStart(
++                    ctrlType, displayId, x, y, inputMethodType));
++            return new Rect(mBoundsAtStart);
++        }
++
++        @Override
++        public Rect onDragPositioningMove(int displayId, float x, float y) {
++            if (!mHandoffAttempted) {
++                mHandoffAttempted = true;
++                mHandoffAccepted = mDesktopTasksController.beginWaydroidTaskWindowDrag(
++                        mWindowDecoration.getTaskInfo().taskId, mCtrlType);
++            }
++            if (mHandoffAccepted) {
++                return new Rect(mBoundsAtStart);
++            }
++            return super.onDragPositioningMove(displayId, x, y);
++        }
++
++        @Override
++        public Rect onDragPositioningEnd(int displayId, float x, float y) {
++            if (mHandoffAccepted) {
++                mHandoffAccepted = false;
++                mHandoffAttempted = false;
++                return new Rect(mBoundsAtStart);
++            }
++            mHandoffAttempted = false;
++            return super.onDragPositioningEnd(displayId, x, y);
++        }
++    }
++
+     @VisibleForTesting
+     static class TaskPositionerFactory {
+         TaskPositioner create(
+@@ -2172,9 +2226,22 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
+                 DesktopState desktopState,
+                 DesktopConfig desktopConfig,
+                 DesktopTasksController desktopTasksController) {
+-            final TaskPositioner taskPositioner = desktopConfig.isVeiledResizeEnabled()
+-                    // TODO(b/383632995): Update when the flag is launched.
+-                    ? (DesktopExperienceFlags.ENABLE_CONNECTED_DISPLAYS_WINDOW_DRAG.isTrue()
++            final TaskPositioner taskPositioner;
++            if (windowDecoration.getTaskInfo().isWaydroidHostWindow) {
++                // Waydroid exposes each Android task as one xdg_toplevel.  Keep
++                // A16's direct WindowContainerTransaction path authoritative for
++                // position and resize; a veiled/mirror surface is not a second
++                // render target that HWC can compose safely.
++                taskPositioner = new FluidResizeTaskPositioner(
++                        taskOrganizer,
++                        transitions,
++                        windowDecoration,
++                        displayController,
++                        transactionFactory,
++                        desktopState);
++            } else if (desktopConfig.isVeiledResizeEnabled()) {
++                // TODO(b/383632995): Update when the flag is launched.
++                taskPositioner = DesktopExperienceFlags.ENABLE_CONNECTED_DISPLAYS_WINDOW_DRAG.isTrue()
+                         ? new MultiDisplayVeiledResizeTaskPositioner(
+                             taskOrganizer,
+                             windowDecoration,
+@@ -2192,20 +2259,28 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
+                             transitions,
+                             interactionJankMonitor,
+                             handler,
+-                            desktopState))
+-                    : new FluidResizeTaskPositioner(
+-                            taskOrganizer,
+-                            transitions,
+-                            windowDecoration,
+-                            displayController,
+-                            transactionFactory,
+                             desktopState);
++            } else {
++                taskPositioner = new FluidResizeTaskPositioner(
++                        taskOrganizer,
++                        transitions,
++                        windowDecoration,
++                        displayController,
++                        transactionFactory,
++                        desktopState);
++            }
+ 
++            TaskPositioner decoratedTaskPositioner = taskPositioner;
+             if (DesktopModeFlags.ENABLE_WINDOWING_SCALED_RESIZING.isTrue()) {
+-                return new FixedAspectRatioTaskPositionerDecorator(windowDecoration,
+-                        taskPositioner);
++                decoratedTaskPositioner = new FixedAspectRatioTaskPositionerDecorator(
++                        windowDecoration, decoratedTaskPositioner);
++            }
++            if (windowDecoration.getTaskInfo().isWaydroidHostWindow) {
++                // Keep the raw AOSP ctrlType outside fixed-aspect decoration.
++                decoratedTaskPositioner = new WaydroidTaskPositionerDecorator(
++                        windowDecoration, desktopTasksController, decoratedTaskPositioner);
+             }
+-            return taskPositioner;
++            return decoratedTaskPositioner;
+         }
+     }
+ }
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/WindowDecoration.java b/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/WindowDecoration.java
+index 6f5ae5b5bcaf..639eb25bb93d 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/WindowDecoration.java
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/WindowDecoration.java
+@@ -384,7 +384,10 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
+                         TYPE_APPLICATION,
+                         FLAG_NOT_FOCUSABLE,
+                         PixelFormat.TRANSPARENT);
+-        lp.setTitle("Caption of Task=" + mTaskInfo.taskId);
++        lp.setTitle("TID:" + mTaskInfo.taskId + "#"
++                + (mTaskInfo.baseActivity != null
++                        ? mTaskInfo.baseActivity.getPackageName() : "?")
++                + "/Caption");
+         lp.setTrustedOverlay();
+         lp.inputFeatures = params.mInputFeatures;
+         if (params.mAsyncViewHost) {
+@@ -460,7 +463,10 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
+         if (mDecorationContainerSurface == null) {
+             final SurfaceControl.Builder builder = mSurfaceControlBuilderSupplier.get();
+             mDecorationContainerSurface = builder
+-                    .setName("Decor container of Task=" + mTaskInfo.taskId)
++                    .setName("TID:" + mTaskInfo.taskId + "#"
++                            + (mTaskInfo.baseActivity != null
++                                    ? mTaskInfo.baseActivity.getPackageName() : "?")
++                            + "/DecorContainer")
+                     .setContainerLayer()
+                     .setParent(mTaskSurface)
+                     .setCallsite("WindowDecoration.updateDecorationContainerSurface")
+@@ -766,7 +772,10 @@ public abstract class WindowDecoration<T extends View & TaskFocusStateConsumer>
+                         TYPE_APPLICATION,
+                         FLAG_NOT_FOCUSABLE | FLAG_WATCH_OUTSIDE_TOUCH,
+                         PixelFormat.TRANSPARENT);
+-        lp.setTitle("Additional window of Task=" + mTaskInfo.taskId);
++        lp.setTitle("TID:" + mTaskInfo.taskId + "#"
++                + (mTaskInfo.baseActivity != null
++                        ? mTaskInfo.baseActivity.getPackageName() : "?")
++                + "/AdditionalWindow");
+         lp.setTrustedOverlay();
+         WindowlessWindowManager windowManager = new WindowlessWindowManager(mTaskInfo.configuration,
+                 windowSurfaceControl, null /* hostInputToken */);
+diff --git a/services/core/java/com/android/server/wm/ActivityStarter.java b/services/core/java/com/android/server/wm/ActivityStarter.java
+index 61971cb8c8f3..c4437d316415 100644
+--- a/services/core/java/com/android/server/wm/ActivityStarter.java
++++ b/services/core/java/com/android/server/wm/ActivityStarter.java
+@@ -169,6 +169,8 @@ import java.util.function.Supplier;
+  */
+ class ActivityStarter {
+     private static final String TAG = TAG_WITH_CLASS_NAME ? "ActivityStarter" : TAG_ATM;
++    private static final String WAYDROID_HOST_WINDOW_LAUNCH_COOKIE =
++            "com.avium.waydroid.launch.HOST_WINDOW";
+     private static final String TAG_RESULTS = TAG + POSTFIX_RESULTS;
+     private static final String TAG_FOCUS = TAG + POSTFIX_FOCUS;
+     private static final String TAG_CONFIGURATION = TAG + POSTFIX_CONFIGURATION;
+@@ -1806,6 +1808,8 @@ class ActivityStarter {
+             started.computeInitialCallerInfo();
+         }
+ 
++        updateWaydroidHostWindowRoute(started);
++
+         // Apply setAlwaysOnTop when starting an activity is successful regardless of creating
+         // a new Activity or reusing the existing activity.
+         if (options != null && options.getTaskAlwaysOnTop()) {
+@@ -1948,6 +1952,48 @@ class ActivityStarter {
+         return startedActivityRootTask;
+     }
+ 
++    private void updateWaydroidHostWindowRoute(ActivityRecord started) {
++        Task task = started.getTask();
++        if (task == null) {
++            task = mTargetTask;
++        }
++        if (task == null && mLastStartActivityRecord != null) {
++            task = mLastStartActivityRecord.getTask();
++        }
++        if (task == null) {
++            return;
++        }
++
++        final boolean sameTaskNavigation = mSourceRecord != null
++                && mSourceRecord.getTask() == task;
++        final boolean trustedHostLaunch = hasTrustedWaydroidHostWindowCookie();
++        final boolean routeToHostWindow = task.getDisplayId() == DEFAULT_DISPLAY
++                && (trustedHostLaunch
++                    || (sameTaskNavigation && task.isWaydroidHostWindow()));
++        final boolean wasHostWindow = task.isWaydroidHostWindow();
++        task.setWaydroidHostWindow(routeToHostWindow);
++
++        // A default-display launch from another Android task owns the normal fullscreen route.
++        // Do not touch non-default displays: Avium/MiFreeform owns their windowing policy.
++        if (wasHostWindow && !routeToHostWindow && !sameTaskNavigation
++                && task.getDisplayId() == DEFAULT_DISPLAY && task.inFreeformWindowingMode()) {
++            task.setWindowingMode(WINDOWING_MODE_FULLSCREEN);
++        }
++    }
++
++    private boolean hasTrustedWaydroidHostWindowCookie() {
++        final IBinder cookie = mStartActivity.mLaunchCookie;
++        if (mCallingUid != android.os.Process.SYSTEM_UID || cookie == null) {
++            return false;
++        }
++        try {
++            return WAYDROID_HOST_WINDOW_LAUNCH_COOKIE.equals(cookie.getInterfaceDescriptor());
++        } catch (RemoteException e) {
++            Slog.w(TAG, "Unable to read Waydroid host-window launch cookie", e);
++            return false;
++        }
++    }
++
+     /**
+      * Start an activity and determine if the activity should be adding to the top of an existing
+      * task or delivered new intent to an existing activity. Also manipulating the activity task
+diff --git a/services/core/java/com/android/server/wm/Task.java b/services/core/java/com/android/server/wm/Task.java
+index 6cb118d205f1..73fd25ec3e2c 100644
+--- a/services/core/java/com/android/server/wm/Task.java
++++ b/services/core/java/com/android/server/wm/Task.java
+@@ -251,6 +251,7 @@ class Task extends TaskFragment {
+     private static final String ATTR_MIN_HEIGHT = "min_height";
+     private static final String ATTR_PERSIST_TASK_VERSION = "persist_task_version";
+     private static final String ATTR_WINDOW_LAYOUT_AFFINITY = "window_layout_affinity";
++    private static final String ATTR_WAYDROID_HOST_WINDOW = "waydroid_host_window";
+ 
+     // How long to wait for all background Activities to redraw following a call to
+     // convertToTranslucent().
+@@ -635,6 +636,9 @@ class Task extends TaskFragment {
+     // Tracking cookie for the creation of this task.
+     IBinder mLaunchCookie;
+ 
++    // Set only by ActivityStarter after validating a system-UID host launch cookie.
++    private boolean mWaydroidHostWindow;
++
+     // The task will be removed when TaskOrganizer, which is managing the task, is destroyed.
+     boolean mRemoveWithTaskOrganizer;
+ 
+@@ -726,6 +730,19 @@ class Task extends TaskFragment {
+         return fromBinder(token.asBinder()).asTask();
+     }
+ 
++    boolean isWaydroidHostWindow() {
++        return mWaydroidHostWindow;
++    }
++
++    void setWaydroidHostWindow(boolean enabled) {
++        if (mWaydroidHostWindow == enabled) {
++            return;
++        }
++        mWaydroidHostWindow = enabled;
++        mAtmService.notifyTaskPersisterLocked(this, false /* flush */);
++        dispatchTaskInfoChangedIfNeeded(true /* force */);
++    }
++
+     void setName(@Nullable String name) {
+         mName = name;
+     }
+@@ -2996,6 +3013,12 @@ class Task extends TaskFragment {
+         super.onDisplayChanged(dc);
+         if (isLeafTask()) {
+             final int displayId = (dc != null) ? dc.getDisplayId() : INVALID_DISPLAY;
++            if (mWaydroidHostWindow && displayId != INVALID_DISPLAY
++                    && displayId != DEFAULT_DISPLAY) {
++                // Avium/MiFreeform owns non-default displays. A real reparent
++                // clears the host route; a temporary detach does not.
++                setWaydroidHostWindow(false);
++            }
+             //Send the callback when the task reparented to another display.
+             if (lastDisplayId != displayId) {
+                 mWmService.mAtmService.getTaskChangeNotificationController()
+@@ -3016,6 +3039,7 @@ class Task extends TaskFragment {
+         final boolean forceResizable = mAtmService.mForceResizableActivities
+                 && getActivityType() == ACTIVITY_TYPE_STANDARD;
+         if (forceResizable) return true;
++        if (mWaydroidHostWindow && getActivityType() == ACTIVITY_TYPE_STANDARD) return true;
+         if (mForceNonResizeOverride) return false;
+ 	return mForceResizeOverride || ActivityInfo.isResizeableMode(mResizeMode)
+         	|| getWindowConfiguration().isPopUpWindowMode()
+@@ -3419,6 +3443,7 @@ class Task extends TaskFragment {
+     void fillTaskInfo(TaskInfo info, boolean stripExtras, @Nullable TaskDisplayArea tda) {
+         info.launchCookies.clear();
+         info.addLaunchCookie(mLaunchCookie);
++        info.isWaydroidHostWindow = mWaydroidHostWindow;
+         final ActivityRecord top = mTaskSupervisor.mTaskInfoHelper.fillAndReturnTop(this, info);
+ 
+         info.userId = getUserId();
+@@ -4032,6 +4057,7 @@ class Task extends TaskFragment {
+         out.attributeInt(null, ATTR_MIN_WIDTH, mMinWidth);
+         out.attributeInt(null, ATTR_MIN_HEIGHT, mMinHeight);
+         out.attributeInt(null, ATTR_PERSIST_TASK_VERSION, PERSIST_TASK_VERSION);
++        out.attributeBoolean(null, ATTR_WAYDROID_HOST_WINDOW, mWaydroidHostWindow);
+ 
+         if (affinityIntent != null) {
+             out.startTag(null, TAG_AFFINITYINTENT);
+@@ -4111,6 +4137,7 @@ class Task extends TaskFragment {
+         int minWidth = INVALID_MIN_SIZE;
+         int minHeight = INVALID_MIN_SIZE;
+         int persistTaskVersion = 0;
++        boolean waydroidHostWindow = false;
+ 
+         for (int attrNdx = in.getAttributeCount() - 1; attrNdx >= 0; --attrNdx) {
+             final String attrName = in.getAttributeName(attrNdx);
+@@ -4205,6 +4232,9 @@ class Task extends TaskFragment {
+                 case ATTR_PERSIST_TASK_VERSION:
+                     persistTaskVersion = Integer.parseInt(attrValue);
+                     break;
++                case ATTR_WAYDROID_HOST_WINDOW:
++                    waydroidHostWindow = Boolean.parseBoolean(attrValue);
++                    break;
+                 default:
+                     if (!attrName.startsWith(TaskDescription.ATTR_TASKDESCRIPTION_PREFIX)) {
+                         Slog.w(TAG, "Task: Unknown attribute=" + attrName);
+@@ -4314,6 +4344,7 @@ class Task extends TaskFragment {
+         task.mLastNonFullscreenBounds = lastNonFullscreenBounds;
+         task.setBounds(lastNonFullscreenBounds);
+         task.mWindowLayoutAffinity = windowLayoutAffinity;
++        task.mWaydroidHostWindow = waydroidHostWindow;
+         if (activities.size() > 0) {
+             // We need to add the task into hierarchy before adding child to it.
+             final DisplayContent dc =
+diff --git a/services/core/java/com/android/server/wm/WindowStateAnimator.java b/services/core/java/com/android/server/wm/WindowStateAnimator.java
+index b3c163b76e66..e7d8ccf37bee 100644
+--- a/services/core/java/com/android/server/wm/WindowStateAnimator.java
++++ b/services/core/java/com/android/server/wm/WindowStateAnimator.java
+@@ -310,7 +310,13 @@ class WindowStateAnimator {
+             final boolean isHwAccelerated = (attrs.flags & FLAG_HARDWARE_ACCELERATED) != 0;
+             final int format = isHwAccelerated ? PixelFormat.TRANSLUCENT : attrs.format;
+ 
++            // Waydroid: tag the app buffer with its task id so the hwcomposer
++            // creates one window per task (upstream TID:<taskId>#<pkg>/<component>).
+             mTitle = attrs.getTitle().toString();
++            final Task task = mWin.getTask();
++            if (task != null) {
++                mTitle = "TID:" + task.mTaskId + "#" + mTitle;
++            }
+             Trace.traceBegin(TRACE_TAG_WINDOW_MANAGER, "new SurfaceControl");
+             mSurfaceControl = mWin.makeSurface()
+                     .setParent(mWin.mSurfaceControl)
+diff --git a/services/tests/wmtests/src/com/android/server/wm/TaskTests.java b/services/tests/wmtests/src/com/android/server/wm/TaskTests.java
+index f42ef2cba615..b3dfde72db7b 100644
+--- a/services/tests/wmtests/src/com/android/server/wm/TaskTests.java
++++ b/services/tests/wmtests/src/com/android/server/wm/TaskTests.java
+@@ -603,11 +603,24 @@ public class TaskTests extends WindowTestsBase {
+     public void testRestoreWindowedTask() throws Exception {
+         final Task expected = createTask(64);
+         expected.mLastNonFullscreenBounds = new Rect(50, 50, 100, 100);
++        expected.setWaydroidHostWindow(true);
+ 
+         final byte[] serializedBytes = serializeToBytes(expected);
+         final Task actual = restoreFromBytes(serializedBytes);
+         assertEquals(expected.mTaskId, actual.mTaskId);
+         assertEquals(expected.mLastNonFullscreenBounds, actual.mLastNonFullscreenBounds);
++        assertTrue(actual.isWaydroidHostWindow());
++        assertTrue(actual.getTaskInfo().isWaydroidHostWindow);
++    }
++
++    @Test
++    public void testWaydroidHostWindowStateClearsFromTaskInfo() {
++        final Task task = createTask(65);
++        task.setWaydroidHostWindow(true);
++        assertTrue(task.getTaskInfo().isWaydroidHostWindow);
++
++        task.setWaydroidHostWindow(false);
++        assertFalse(task.getTaskInfo().isWaydroidHostWindow);
+     }
+ 
+     /** Ensure we have no chance to modify the original intent. */

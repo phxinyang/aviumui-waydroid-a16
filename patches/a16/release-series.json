@@ -1,0 +1,1065 @@
+{
+  "schema_version": 1,
+  "projects": [
+    {
+      "path": "bionic",
+      "base_head": "7ad2441de12bf7b5dc0055e0a940583d80fe104b",
+      "expected_tree": "fa1be7fe8a6cbeb91a56a24b6bfff27cb62b682f",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "bionic/0001-hybris-don-t-fail-because-of-fsetxattr.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "bionic/0002-waydroid-add-vendor_extra-lib-folders-to-default-lib.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "bionic/0003-linker-Allow-text-relocs-for-x86-only.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "bionic/0004-Add-syscalls-ioperm-and-iopl.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "bionic/0005-We-need-text-relocations.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "bionic/0006-seccomp-Allow-SYS_kcmp-for-mesa.patch"
+        }
+      ]
+    },
+    {
+      "path": "build/soong",
+      "base_head": "2e5b2070e5c672dce237ef0118e1d7bb43f6773d",
+      "expected_tree": "62bb2fa435e411dcefe4819ea093a0f3a6f4febf",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "build/soong/0001-waydroid-do-not-fail-on-VNDK-ABI-mismatch.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "build/soong/0003-Allow-compressed-dex-on-privileged-prebuilt-APKs.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "build/soong/0004-Add-rust-tools-to-PATH-allowlist.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "build/soong/0005-Allow-network-connection-in-sandbox.patch"
+        },
+        {
+          "source": "local",
+          "path": "manual/build-soong/0002-fix-building-on-a16.patch"
+        }
+      ]
+    },
+    {
+      "path": "device/generic/goldfish",
+      "base_head": "7b227068cbf159c07096bd1c5ec5c479c9a430a2",
+      "expected_tree": "0fda74af109450df5703b4a103cfa13e7c5b180e",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "device/generic/goldfish/0001-wifi-probe-wifi0-in-emulated-HAL-interface-list.patch"
+        }
+      ]
+    },
+    {
+      "path": "device/lineage/sepolicy",
+      "base_head": "20220286342d89b6b169faa09fb20bdeac937d79",
+      "expected_tree": "b94ce8538a495679aa02963c73e01569816113c6",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "device/lineage/sepolicy/0001-Remove-conflicting-selinux-labels.patch"
+        }
+      ]
+    },
+    {
+      "path": "external/libva-utils",
+      "base_head": "5896b6779d36f83bf483aff62da8aae30ba8d664",
+      "expected_tree": "50c302970b0c1231f8604e2b0128c91188dde00b",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "external/libva-utils/0001-Android.bp-Include-libva_headers.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "external/libva-utils/0002-Android.bp-Fix-license-file-location.patch"
+        }
+      ]
+    },
+    {
+      "path": "external/llvm-project",
+      "base_head": "bd650b421a8ba5c785ad6d8a2a64e304c6994e91",
+      "expected_tree": "9b49cf6e0a4228c49c78a6a7e0fd48e4f296abd1",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "external/llvm-project/0001-Fix-building-on-A16.patch"
+        }
+      ]
+    },
+    {
+      "path": "external/mesa3d",
+      "base_head": "1c88fb1f025d6d39bd7384b12aea642fb109af69",
+      "expected_tree": "7f0eb332fb5fcabdb8c3c0d8fc10fa1db67c0047",
+      "patches": [
+        {
+          "source": "local",
+          "path": "fixes/external-mesa3d/0001-use-system-python-for-meson.patch"
+        }
+      ]
+    },
+    {
+      "path": "external/minigbm",
+      "base_head": "9b85c0b9fd28abfb5f801cb8032621eee9ed3e42",
+      "expected_tree": "8fedebc80f7be972c4da59de469aa735f2ed5227",
+      "patches": [
+        {
+          "source": "local",
+          "path": "fixes/external-minigbm/0001-include-unistd-for-fd-apis.patch"
+        }
+      ]
+    },
+    {
+      "path": "external/selinux",
+      "base_head": "085c131ad1b984bfa8ffdafee7a976e9d89f403c",
+      "expected_tree": "5148a55921550db3670c0074c6355ab562a38386",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "external/selinux/0001-ignore-selinux.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "external/selinux/0002-Suppress-SELinux-logs.patch"
+        }
+      ]
+    },
+    {
+      "path": "external/wayland-protocols",
+      "base_head": "f7645122a11fcb923cbc36721ce9c111b098be99",
+      "expected_tree": "6c1bd4aca3d386dbf62ad55c1b80990f3015cd20",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "external/wayland-protocols/0001-staging-Add-fractional-scale.patch"
+        }
+      ]
+    },
+    {
+      "path": "frameworks/av",
+      "base_head": "e40c0b45225070d717393301c5e209a7ff03c46b",
+      "expected_tree": "bf96e132369aab9b4626491740b0b65f82995cc5",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0001-media-xmlparser-Add-host-dirs-to-search-path.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0002-media-Use-vendor_extra-seccomp-minijail.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0003-media-Add-host-media_profiles-search-paths.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0004-apex-Add-vendor_extra-to-ld-search-paths.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0005-SW-encode-Fix-output-buffer-size.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0006-FLACExtractor-Add-more-sample-rates-support.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0007-Don-t-use-YV12-color-format-for-video-decoding.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0008-Allow-screenrecord-usage-on-Android-x86.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0009-media-enable-dithering-for-RGB565-conversion.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0010-nuplayer-skip-bad-SAR-values.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0011-stagefright-Add-support-for-loading-a-custom-OMXPlug.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0012-stagefright-allow-multiple-custom-OMXPlugins.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0013-libstagefright-Extended-media-support-via-FFMPEG.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0014-Disable-CFI.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0015-Add-paths-and-system-libraries-for-swcodec-APEX.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0016-Setup-FFMPEG-audio-mpeg-L2-codec-correctly.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0017-libstagefright-Extract-parts-of-FFMPEGSoftCodec-for-.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0018-Allow-mediacodec-services-to-use-mesa3d-required-sys.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0019-Add-OMX-extensions-from-stagefright-plugins.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0020-Add-media-extensions-for-FFMPEG-codec2-service.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0021-Allow-sysinfo-syscall-for-screen-recording.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0022-mediaextractor-seccomp-Allow-memfd-related-syscalls.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0023-codec2-Make-RGBA-RGBX-8888-into-usable-formats.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0024-codec2-Initial-support-for-RGB565.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0025-codec2-Initial-support-for-BGRA_8888.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0026-Enable-all-codec2-components-when-debug.stagefright..patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0027-Only-enable-c2.android-video-decoders-when-using-min.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0028-Fix-building-on-A16.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/av/0029-audioserver-Remove-WAKE_ALARM-capability.patch"
+        }
+      ]
+    },
+    {
+      "path": "frameworks/base",
+      "base_head": "95a1d4ff3979ee0abc48feca0577817d3024a436",
+      "expected_tree": "4af36c9bec5cc91b8ace1361731b74e4be18b363",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "frameworks/base/0001-waydroid-disable-SELinux-parts.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/base/0002-waydroid-disable-suspend-control.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/base/0003-waydroid-disable-app-dir-isolation-using-SELinux.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/base/0004-fwb-Don-t-check-vintf-compatibility.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/base/0005-Power-Add-proper-suspender.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/base/0006-clipboard-Talk-with-waydroid-host-service-to-get-cli.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/base/0007-SystemConfig-Add-host-permissions-dir.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/base/0008-Modify-color-inversion-matrix-to-swap-Red-and-Blue-c.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/base/0009-Fake-touch-inputs-for-select-apps.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/base/0010-Allow-work-without-wake_alarm-capability.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/base/0011-Send-pointer-capture-status-to-the-waydroid-hwcompos.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/base/0013-Enable-fix-to-user-rotation-by-default-without-waydr.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/base/0014-Ignore-cgroup-error.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/base/0015-Do-not-fail-when-proc-config.gz-is-missing.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/base/0016-DisplayModeDirector-Always-use-highest-available-ref.patch"
+        },
+        {
+          "source": "local",
+          "path": "manual/frameworks-base/0012-idle-inhibit.patch"
+        },
+        {
+          "source": "local",
+          "path": "manual/frameworks-base/0017-waydroid-framework.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/frameworks-base/0001-permission-appop-consistency.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/frameworks-base/0002-secure-lock-permission-guard.patch"
+        }
+      ]
+    },
+    {
+      "path": "frameworks/native",
+      "base_head": "7d24f30f0863f0024c66e6f56902a8bd1fd2dbfe",
+      "expected_tree": "9306225589fd7e95773c860bcc5d56919be3a097",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "frameworks/native/0001-installd-run-without-SELinux.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/native/0002-halium-disable-SELinux-checks-in-ServiceManager.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/native/0003-halium-never-set-FLAT_BINDER_FLAG_TXN_SECURITY_CTX-f.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/native/0004-EventHub-Add-wayland-inputs-support.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/native/0005-inputflinger-add-absolute-event-support-for-cursor.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/native/0006-surfaceflinger-Provide-layer-names-and-stuffs.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/native/0007-RenderEngine-support-non-RGBA_8888-format.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/native/0008-libEGL-select-pixel-format-by-EGL_NATIVE_VISUAL_ID.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/native/0009-native-Address-host-uid-services-as-system-UID.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/native/0010-GraphicBufferMapper-Skip-buffer-validation.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/native/0011-gui-Restore-the-name-of-the-cursor-layer-as-Sprite.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/native/0012-sf-Always-commit-layer-even-if-not-visible-in-multi-.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/native/0013-libgui-Extend-metadata-to-parent-surface.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/native/0014-Set-InputDeviceClass-DPAD-class-for-Wayland-virtual-.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/native/0015-libbinder-Support-host-AIDL-services-via-dev-host_bi.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/native/0016-surfaceflinger-Build-against-the-Waydroid-display-HI.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/native/0017-surfaceflinger-Send-layer-buffer-info-to-hwcomposer-.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/native/0018-surfaceflinger-Always-request-client-composition.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "frameworks/native/0019-libbinder-pre-A16-host-servicemanager-compatibility-.patch"
+        }
+      ]
+    },
+    {
+      "path": "frameworks/opt/net/wifi",
+      "base_head": "e7e8646a896f2ee736ccca935c862d52f0492b07",
+      "expected_tree": "5364c19474cbdfc4989c393c99c36700dc63fadd",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "frameworks/opt/net/wifi/0001-libwifi-system-iface-honor-wifi.interface-in-SetWifi.patch"
+        }
+      ]
+    },
+    {
+      "path": "hardware/interfaces",
+      "base_head": "941911355a5dfcff8ff7fa7d40b8062f4c4593f5",
+      "expected_tree": "8e80f1de230b38023c54b16a41267eb5377b186d",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "hardware/interfaces/0001-hwc2on1-Fixup-HWC_IS_CURSOR_LAYER-flag.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "hardware/interfaces/0002-health-Drop-CAP_WAKE_ALARM.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "hardware/interfaces/0003-hwc2on1-Handle-primary-hotplugs.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/hardware-interfaces/0001-hwc2-adapter-buffer-ownership.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/hardware-interfaces/0002-arm64-only-and-nonsecure-apex-build.patch"
+        }
+      ]
+    },
+    {
+      "path": "hardware/libhardware",
+      "base_head": "0c3e9e0fe76d30d32282c7e8fcdbddc393dc297b",
+      "expected_tree": "4c00abbf7f71255fc3fd570669ff6b949645c430",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "hardware/libhardware/0001-waydroid-add-vendor_extra-lib-hw-to-HAL-search-path.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "hardware/libhardware/0002-libhardware-Don-t-check-for-ro.hardware.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "hardware/libhardware/0003-HACK-Avoid-crashes-on-SurfaceFlinger-when-using-soft.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "hardware/libhardware/0004-gralloc-Force-use-ashmem.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "hardware/libhardware/0005-gralloc-Support-more-pixel-formats.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "hardware/libhardware/0006-gralloc-Add-YUV-format-support.patch"
+        }
+      ]
+    },
+    {
+      "path": "lineage-sdk",
+      "base_head": "8c6692be5936932eeeeac9648ffc62f06fd52764",
+      "expected_tree": "c4afffe3db5fbf82b06b81ec2b7081c7d7bead8f",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "lineage-sdk/0001-sdk-Introduce-WayDroid-Service.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "lineage-sdk/0002-WayDroidHardware-Support-64-bit-timestamps-in-upgrad.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "lineage-sdk/0003-WayDroidClipboard-Switch-to-vendor.waydroid.clipboar.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "lineage-sdk/0004-WayDroidService-Add-notification-manager.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "lineage-sdk/0005-WayDroidService-Add-Leanback-intent-support.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "lineage-sdk/0006-WayDroidService-Add-a-prop-to-enable-notification-re.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "lineage-sdk/0007-WayDroidService-Show-warning-when-DMA-BUF-heap-is-mi.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "lineage-sdk/0009-WayDroidService-Mark-pendingIntent-as-mutable-during.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "lineage-sdk/0010-WayDroidServices-Add-more-warnings.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "lineage-sdk/0011-WayDroidServices-Notify-host-on-reboot-shutdown.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "lineage-sdk/0012-WayDroidClipboard-Rename-class-to-prevent-naming-con.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/lineage-sdk/0001-restore-waydroid-notification-resources.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/lineage-sdk/0002-export-waydroid-notification-symbols.patch"
+        }
+      ]
+    },
+    {
+      "path": "packages/apps/LineageCustomizer",
+      "base_head": "84b03919bfb15aa3c72bacdd28c1f900df9385db",
+      "expected_tree": "99d6c5026de770fd1e2b9b773785d173788daf35",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "packages/apps/LineageCustomizer/0001-Add-fields-required-by-Google-TV-launcher.patch"
+        }
+      ]
+    },
+    {
+      "path": "packages/apps/Settings",
+      "base_head": "44abb5b06b53c9434658c5878b38963f12062ddb",
+      "expected_tree": "ef414e6c2ff1147491d877caf08b1b7198671d28",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "packages/apps/Settings/0001-Add-information-about-OpenGL-driver-version.patch"
+        }
+      ]
+    },
+    {
+      "path": "packages/apps/SetupWizard",
+      "base_head": "ef3e9aee055caf168a0a26ef2bba47fc19c34655",
+      "expected_tree": "ad5e6af03682bde14121767bbd28fac1e44e4575",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "packages/apps/SetupWizard/0001-Skip-bluetooth-pairing-screen.patch"
+        }
+      ]
+    },
+    {
+      "path": "packages/modules/Bluetooth",
+      "base_head": "58cc83ed8822c658ffbe53f10bb107feeedf3266",
+      "expected_tree": "db005c533392cb5ac05ff29fe207978f07b302ea",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "packages/modules/Bluetooth/0001-Replace-CLOCK_BOOTTIME_ALARM-with-CLOCK_BOOTTIME.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/packages-modules-bluetooth/0001-fail-soft-when-service-missing.patch"
+        }
+      ]
+    },
+    {
+      "path": "packages/modules/Connectivity",
+      "base_head": "c9f3e7795256bd4a3f99d02e604e24fd1552c2b3",
+      "expected_tree": "b6749cf5f266a2dc76f030db32e8927d0f147a6c",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "packages/modules/Connectivity/0001-fix-booting.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "packages/modules/Connectivity/0002-ignore-nativeSynchronizeKernelRCU-error.patch"
+        }
+      ]
+    },
+    {
+      "path": "packages/modules/NetworkStack",
+      "base_head": "853cb402bf02cd935d06d42c1155b0023eabd3e6",
+      "expected_tree": "37cbc6ec6f2d1cf605feb14bbfbb869ec761cb0c",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "packages/modules/NetworkStack/0001-Disable-captive-portal-check-by-default.patch"
+        }
+      ]
+    },
+    {
+      "path": "packages/modules/adb",
+      "base_head": "262cc9ada912c17f30f3130ae22e8012be4e10fe",
+      "expected_tree": "145d62e40ddc49be67cacc514e37b5492a60424c",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "packages/modules/adb/0001-adb-Disable-selinux-when-root.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "packages/modules/adb/0002-Patching-ADBD-in-order-to-drop-privileges-unconditio.patch"
+        }
+      ]
+    },
+    {
+      "path": "platform_testing",
+      "base_head": "8037f13cdf3d529fe396f5013f8f944050229861",
+      "expected_tree": "c291760464d1b20074ae2c5160e8e395c91e4304",
+      "patches": [
+        {
+          "source": "local",
+          "path": "fixes/platform-testing/0001-drop-removed-cuttlefish-dependencies.patch"
+        }
+      ]
+    },
+    {
+      "path": "prebuilts/build-tools",
+      "base_head": "412724a805835d89234d67c363f7ada7f5f8a67f",
+      "expected_tree": "0ae5242a7e4532efb02f296194d0c2bdf20550ed",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "prebuilts/build-tools/0001-Add-prebuilt-mesa-tools-to-PATH.patch"
+        }
+      ]
+    },
+    {
+      "path": "system/apex",
+      "base_head": "97548ed51112062a4d1762a7dffa0cadcc09bda9",
+      "expected_tree": "e56d72d8dca1a76e5d666d5a80532e5a608e9d2b",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "system/apex/0001-apexd-Configure-loop-device-on-detached-sysfs-mount.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/system-apex/0001-container-sysfs-best-effort.patch"
+        }
+      ]
+    },
+    {
+      "path": "system/bpf",
+      "base_head": "6c5f4f865220e27cda2a9f4210023a7a10f5bafc",
+      "expected_tree": "de677420fc7c6a49e2343395c886b3ce1af29e2b",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "system/bpf/0001-Support-no-bpf-usecase.patch"
+        }
+      ]
+    },
+    {
+      "path": "system/core",
+      "base_head": "202f54380091906fafe35681b0a68ec2fe3c1a4d",
+      "expected_tree": "dd7906f5e826da1e91f409b34cd71c2cf5f86b76",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "system/core/0001-waydroid-init-start-inside-LXC-container-without-SEL.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0002-waydroid-init-modify-mount_all-to-skip-mounts-and-tr.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0003-halium-init-ignore-androidboot.force_normal_boot-in-.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0004-libsync-Add-sw_sync-symbols-to-map.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0005-init-Define-host-user.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0006-core-Add-waydroid-to-product-allowed-sources.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0007-init-Allow-setting-sys.use_memfd-before-boot.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0008-Revert-init-Treat-failure-to-create-a-process-group-.patch"
+        },
+        {
+          "source": "local",
+          "path": "manual/system-core/0009-override-ro-vndk-lite.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0010-init-Drop-CAP_WAKE_ALARM.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0011-ashmem-Prevent-integer-overflow-protection.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0012-init-Substitute-swiftshader-with-angle-pastel-on-ven.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0013-init-Import-waydroid.prop-last.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0014-init-Do-not-try-to-mount-binderfs.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0015-ueventd-Ignore-input-block-tty-device-uevent-by-defa.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0016-processgroup-Do-not-fail-on-cgroup-creation.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0017-init-Allow-overriding-read-only-props-on-waydroid-in.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0018-init-Do-not-try-to-force-unmount-data-on-reboot.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0019-ashmem-Do-not-check-for-ashmem-memfd-kernel-support.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0020-ashmem-Fallback-to-old-method-for-checking-memfd-whe.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0021-init-Run-waydroid-preinit-first-before-doing-anythin.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0022-healthd-Fake-battery-level-when-no-battery-is-found.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0023-init-Drop-harmful-capabilities.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0024-ueventd-Regenerate-uevent-on-detached-sysfs-mount.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0025-processgroup-Do-not-try-to-mount-sys-fs-cgroup.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0026-processgroup-Switch-to-cgroup-v2.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/core/0027-processgroup-Move-all-processes-away-from-root-cgrou.patch"
+        }
+      ]
+    },
+    {
+      "path": "system/gatekeeper",
+      "base_head": "604418333097ac26ab0ba51319221bf2bb2b6d2f",
+      "expected_tree": "06159ed1143df8c6e78d4309eab5816d736c6625",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "system/gatekeeper/0001-unprivate.patch"
+        }
+      ]
+    },
+    {
+      "path": "system/hwservicemanager",
+      "base_head": "21b593ef1d78e8fd23140bac5255bcbc51d5aea0",
+      "expected_tree": "636b6cba92695ff3fc2233cdd703732af764a168",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "system/hwservicemanager/0001-halium-disable-SELinux-parts.patch"
+        }
+      ]
+    },
+    {
+      "path": "system/libhwbinder",
+      "base_head": "0e0fd15c90a55a45d2cc49b032c25b581d085912",
+      "expected_tree": "d930d65cecd94f5309fe146868f4cb31510738c7",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "system/libhwbinder/0001-Never-set-FLAT_BINDER_FLAG_TXN_SECURITY_CTX-flag.patch"
+        }
+      ]
+    },
+    {
+      "path": "system/linkerconfig",
+      "base_head": "12743643593c9f13784ed30424db2ea09a7bc65f",
+      "expected_tree": "0a375bc6d66701d08eb320584aab8c09768550ca",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "system/linkerconfig/0001-waydroid-add-vendor_extra-path-as-a-clone-of-vendor-.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/linkerconfig/0002-rootdir-Add-odm_extra-to-ld-paths.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/linkerconfig/0003-add-namespace-change-for-houdini.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/linkerconfig/0004-linkerconfig-expose-extra-system-libs-to-A14-MediaTe.patch"
+        }
+      ]
+    },
+    {
+      "path": "system/logging",
+      "base_head": "e63321648d4f2cb7c437bd615366e8f8765ad2bc",
+      "expected_tree": "08580ab7693518bce73e4f5957415dfe6afd81a3",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "system/logging/0001-logd-Do-not-block-waiting-for-LogcatManagerService.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/system-logging/0001-logd-fail-soft-on-background-scheduling.patch"
+        }
+      ]
+    },
+    {
+      "path": "system/memory/lmkd",
+      "base_head": "5352c3c8c9e26cadaf31a80b1223019b2898a385",
+      "expected_tree": "796d05626f6dd89e2df894d5fcb53dca78fdea09",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "system/memory/lmkd/0001-lmkd-Do-not-fail-when-both-vmpressure-and-psi-monito.patch"
+        }
+      ]
+    },
+    {
+      "path": "system/netd",
+      "base_head": "796eaca5ab9dfdd87751c51bb71fa3f26c87d034",
+      "expected_tree": "dcbe6ec4e5343c542b14016ec1541f39fa3700ef",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "system/netd/0001-ignore-iptables-error.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/netd/0002-ignore-bpf-error.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/netd/0003-ignote-getTetherStats-error.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/system-netd/0001-continue-when-cgroup-v2-root-unavailable.patch"
+        }
+      ]
+    },
+    {
+      "path": "system/security",
+      "base_head": "13c7946e5cb6abec857da20e934185e3b3d4427d",
+      "expected_tree": "39d913c5e7071b47e0a2346c35b3a500e575d952",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "system/security/0001-keystore2-Ignore-selinux-checks.patch"
+        }
+      ]
+    },
+    {
+      "path": "system/vold",
+      "base_head": "cd2c5dea3e93c07be61576f658d002ecc4570de2",
+      "expected_tree": "9a564411a65740e274766826e8d6f97a12d17d40",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "system/vold/0001-halium-do-not-exit-if-unable-to-find-logical-partiti.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/vold/0002-halium-do-not-attempt-to-mount-partitions-with-metad.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/vold/0003-vold-Fix-fuse-sdcard.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/vold/0004-vold-Drop-selinux-checks-on-prepare_subdirs.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/vold/0005-vold-Disable-fstab-check.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/vold/0006-vold-Allow-failing-to-set-quota.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/vold/0007-vold-Disable-AbortFuseConnections.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "system/vold/0008-vold-Read-storage-size-in-filesystem-level.patch"
+        }
+      ]
+    },
+    {
+      "path": "vendor/avium",
+      "base_head": "8812dce06ac6af3e74975dd9a71b3ea21002d6d2",
+      "expected_tree": "21228027f7b79ee53bf83cae229542b9bc416d50",
+      "patches": [
+        {
+          "source": "local",
+          "path": "fixes/vendor-avium/0001-drop-unused-generated-kernel-headers.patch"
+        }
+      ]
+    },
+    {
+      "path": "vendor/intel/gmmlib",
+      "base_head": "0246660b2ade17afc1c9c4c510368fa649ca809f",
+      "expected_tree": "3c6eceaf6c45cedfc41eb6c224af4b9f389f3e3c",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "vendor/intel/gmmlib/0001-Android.bp-Update-source-file-list.patch"
+        },
+        {
+          "source": "upstream",
+          "path": "vendor/intel/gmmlib/0002-Allow-building-on-32-bit-x86.patch"
+        }
+      ]
+    },
+    {
+      "path": "vendor/intel/media-driver",
+      "base_head": "1d2d8e96aeaba0471dc7fd0a7e85190519758fc5",
+      "expected_tree": "126517d51ca49f13d841231b31a3fca3c98b7ca9",
+      "patches": [
+        {
+          "source": "upstream",
+          "path": "vendor/intel/media-driver/0001-Add-Android.bp-for-building-with-AOSP.patch"
+        }
+      ]
+    },
+    {
+      "path": "build/make",
+      "base_head": "b404a57290647f7970db489301efd4f241ce4691",
+      "expected_tree": "94cd4b0fe073185dbbe1f1f00c6ab50f25600db5",
+      "patches": [
+        {
+          "source": "local",
+          "path": "fixes/build-make/0001-drop-care-map-proto-from-releasetools.patch"
+        }
+      ]
+    },
+    {
+      "path": "packages/modules/ExtServices",
+      "base_head": "004fdc40515712fb6a4c1af83e7012af1a053e00",
+      "expected_tree": "92acebbe1ea959d244a44d8a43e8ad5888e1ad3c",
+      "patches": [
+        {
+          "source": "local",
+          "path": "fixes/packages-modules-extservices/0001-guard-text-classifier-security.patch"
+        }
+      ]
+    },
+    {
+      "path": "packages/apps/DeviceDiagnostics",
+      "base_head": "6a93abdc96f0e553bac7efd5b41f0e549f4746be",
+      "expected_tree": "8835d948f84821964c53efdafe2dcd07a111f31e",
+      "patches": [
+        {
+          "source": "local",
+          "path": "fixes/packages-apps-devicediagnostics/0001-guard-trade-in-security.patch"
+        }
+      ]
+    }
+  ],
+  "skips": [
+    {
+      "patch": "upstream:device/google/atv/0001-Lift-maxUiWidth-restiction-on-ATV.patch",
+      "reason": "device/google/atv is removed by the Waydroid local manifest",
+      "predicate": "missing_project:device/google/atv"
+    },
+    {
+      "patch": "upstream:lineage-sdk/0008-trust-Suppress-SELinux-warning.patch",
+      "reason": "AviumUI removed TrustInterfaceService during its Trust cleanup",
+      "predicate": "file_not_contains:lineage-sdk:lineage/lib/main/java/org/lineageos/platform/internal/TrustInterfaceService.java:postNotificationForFeatureInternal"
+    }
+  ]
+}

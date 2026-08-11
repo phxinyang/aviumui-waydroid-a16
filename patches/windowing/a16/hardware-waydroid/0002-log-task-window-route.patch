@@ -1,0 +1,25 @@
+From 8e2f5c3b2f3f39aab9d1b8d0e3f4c5d6e7f8a9b0 Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Wed, 12 Aug 2026 00:10:00 +0000
+Subject: [PATCH] waydroid-hwc: log task window route contents
+
+The framework publishes title/app-id/component per task route. Log the exact
+values so the host-window identity contract is machine-verifiable at runtime
+without compositor-side window introspection (GNOME 50 restricts
+org.gnome.Shell.Introspect.GetWindows).
+
+diff --git a/hwcomposer/WaydroidWindow.cpp b/hwcomposer/WaydroidWindow.cpp
+index 542feaac43b7e964962475bfa1ee08e5c2a8a2d5..f28a2b1 100644
+--- a/hwcomposer/WaydroidWindow.cpp
++++ b/hwcomposer/WaydroidWindow.cpp
+@@ -186,5 +186,9 @@ Return<bool> WaydroidWindow::setTaskWindowRoute(uint32_t taskID, bool enabled,
+     route.component = component.c_str();
+     route.title = title.c_str();
+     route.app_id = appID.c_str();
++    ALOGI("TASK_ROUTE_SET task=%u enabled=%d display=%d component=%s "
++          "title=%s app_id=%s",
++          taskID, enabled, displayID, component.c_str(), title.c_str(),
++          appID.c_str());
+     return mDisplay->set_task_window_route(taskID, route);
+ }
+ 

@@ -1,0 +1,92 @@
+From 74607cd9bd2de3e4044134648a4827fad65f72c5 Mon Sep 17 00:00:00 2001
+From: Avium Window Reproducer <avium-window-reproducer@example.invalid>
+Date: Tue, 11 Aug 2026 01:04:00 +0800
+Subject: [PATCH] WayDroidService: mark host launches with authenticated cookie
+
+Change-Id: I4cff7bfe11a5884e36adec1397a193490d398a0f
+---
+ .../platform/internal/WayDroidService.java    | 29 +++++++++++++------
+ 1 file changed, 20 insertions(+), 9 deletions(-)
+
+diff --git a/lineage/lib/main/java/org/lineageos/platform/internal/WayDroidService.java b/lineage/lib/main/java/org/lineageos/platform/internal/WayDroidService.java
+index 20acf6f3..e3f3caf4 100644
+--- a/lineage/lib/main/java/org/lineageos/platform/internal/WayDroidService.java
++++ b/lineage/lib/main/java/org/lineageos/platform/internal/WayDroidService.java
+@@ -16,6 +16,9 @@
+ 
+ package org.lineageos.platform.internal;
+ 
++import static android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM;
++
++import android.app.ActivityOptions;
+ import android.app.Notification;
+ import android.app.NotificationChannel;
+ import android.app.NotificationManager;
+@@ -32,6 +35,7 @@ import android.content.pm.PackageInstaller;
+ import android.content.pm.PackageManager;
+ import android.content.pm.PackageManager.NameNotFoundException;
+ import android.content.pm.ResolveInfo;
++import android.os.Binder;
+ import android.os.IBinder;
+ import android.os.RemoteException;
+ import android.os.SystemProperties;
+@@ -83,6 +87,8 @@ public class WayDroidService extends LineageSystemService {
+     private static final String BROADCAST_ACTION_UNINSTALL =
+             "org.lineageos.platform.waydroid.ACTION_UNINSTALL_COMMIT";
+     private static final String ICONS_DIR = "/data/icons";
++    private static final String WAYDROID_HOST_WINDOW_LAUNCH_SOURCE =
++            "com.avium.waydroid.launch.HOST_WINDOW";
+ 
+     private static final String WAYDROID_CHANNEL_ID = "WaydroidService";
+     private static final String WAYDROID_CHANNEL_ID_TV = "WaydroidService.tv";
+@@ -209,13 +215,6 @@ public class WayDroidService extends LineageSystemService {
+         if (mUM != null) {
+             mUM.userUnlocked(user.getUserIdentifier());
+         }
+-        Intent homeIntent = new Intent(Intent.ACTION_MAIN);
+-        homeIntent.addCategory(Intent.CATEGORY_HOME);
+-        ResolveInfo defaultLauncher = mPm.resolveActivity(homeIntent, PackageManager.MATCH_DEFAULT_ONLY);
+-        if (defaultLauncher.activityInfo != null) {
+-            String nameOfLauncherPkg = defaultLauncher.activityInfo.packageName;
+-            SystemProperties.set("waydroid.blacklist_apps", nameOfLauncherPkg);
+-        }
+     }
+ 
+     private boolean isTv() {
+@@ -261,6 +260,18 @@ public class WayDroidService extends LineageSystemService {
+         mNotificationManager.notify(notificationId, notification.build());
+     }
+ 
++    private void startDesktopActivity(Intent intent) {
++        ActivityOptions options = ActivityOptions.makeBasic();
++        options.setLaunchWindowingMode(WINDOWING_MODE_FREEFORM);
++        options.setLaunchCookie(new Binder(WAYDROID_HOST_WINDOW_LAUNCH_SOURCE));
++        final long identity = Binder.clearCallingIdentity();
++        try {
++            mContext.startActivity(intent, options.toBundle());
++        } finally {
++            Binder.restoreCallingIdentity(identity);
++        }
++    }
++
+     private Intent getAppLaunchIntent(String packageName) {
+         Intent launchIntent = null;
+ 
+@@ -704,7 +715,7 @@ public class WayDroidService extends LineageSystemService {
+                 return;
+             }
+ 
+-            mContext.startActivity(launchIntent);
++            startDesktopActivity(launchIntent);
+         }
+ 
+         @Override
+@@ -721,7 +732,7 @@ public class WayDroidService extends LineageSystemService {
+ 
+             ResolveInfo ri = mPm.resolveActivity(i, 0);
+             try {
+-                mContext.startActivity(i);
++                startDesktopActivity(i);
+             } catch (ActivityNotFoundException ignored) {}
+ 
+             if (ri != null) {

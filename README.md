@@ -1,82 +1,46 @@
-# AviumUI × Waydroid (Android 16 arm64)
+# AviumUI x Waydroid A16
 
-把 [AviumUI](https://github.com/AviumUI)（LineageOS 23.2 / Android 16 QPR2）构建成 Waydroid 镜像，跑在 Xiaomi Pad 6S Pro（arm64, sm8550 主线内核）上。
+这是 AviumUI `avium-16.2`（Android 16）Waydroid arm64 的可复现配方仓库，不是 Android 源码树。目标是从固定 manifest、固定补丁 series 和记录过的构建环境生成成对的 `system.img`/`vendor.img`，并为 Linux host app 提供按 task 路由的独立 Wayland 窗口，同时保留 AviumUI 默认全屏与原生小窗。
 
-这个仓库是**配方**，不是源码树。AOSP 树（275G）和构建产物（79G）不在这里，靠脚本 + manifest + 补丁复现。
+当前仓库仍处于重构和验收阶段。已有实验镜像、构建机 dirty tree 和窗口实验不能代替新的 clean build；本文不宣称部署或三入口真机验收已经完成。
 
-> **2026-08-06 接手审计：** AviumUI A16 arm64 的编译与启动已经打通；Linux 窗口集成仍是实验态，当前源码、构建产物和平板安装态不一致。新的事实基线、实施顺序与回滚见 [plan.md](plan.md)，已验证问题见 [BUGS.md](BUGS.md)。`docs/WINDOWING.md` 和 `docs/ISSUES.md` 保留 8 月 4 日前的历史判断，不作为当前实施依据。
+## 唯一入口
 
-> **构建硬阻塞：** 当前禁止在已有 `/build` 工作树运行 `scripts/patch-and-build.sh`。脚本会执行 `repo sync -l -c` 与 `git reset --hard`，会覆盖接手现场；下方端到端流程是历史流程，完成 `plan.md` 阶段 1 重写前不可直接重放。
+所有正式 A16 构建动作都从 [`scripts/avium-a16.sh`](scripts/avium-a16.sh) 进入。命令格式为：
 
-## 现状
-
-镜像已构建成功并在平板上启动到 launcher 桌面。图形管线（surfaceflinger / system_server / gralloc）打通，触控输入栈正常。
-
-**镜像状态（2026-08-04）**：
-- 可运行基线：`system.img` md5 `7a4b98eb`（desktop=true，AviumUI 能显示；应用窗口 caption、full UI 与 resize 仍有 `BUGS.md` 中的确认问题）
-- 实验版：`system.img` md5 `49c3f547`（desktop=false 重编，**黑屏**——根因是重编后 SF 要求 Composer3，vendor 只有 Composer2.4，与 desktop 改动无关）
-- 构建机保留：`system.img.pre-desktopoff`（旧可用版）+ 当前构建产物
-
-**窗口模式状态**：当前还未达到官方 A13 的“一项 Android task 一个 Linux 窗口”；见 [plan.md](plan.md)。
-
-当前 Bug 清单见 [BUGS.md](BUGS.md)。
-
-## 端到端流程
-
-```
-┌─ 构建机 (x86_64, ≥16 核, ≥23G 内存, ≥120G 磁盘) ────────────┐
-│ 1. docker build -f docker/Dockerfile -t avium-build .       │
-│ 2. repo init AviumUI manifest → 放入 manifests/waydroid.xml │
-│    → repo sync                                              │
-│ 3. [历史/禁用] scripts/patch-and-build.sh                    │
-│ 4. [仅当前现场续编] scripts/resume-build.sh                  │
-│    → lunch lineage_waydroid_arm64_only bp4a userdebug       │
-│    → m -j8 systemimage vendorimage                          │
-│ 产物: out/target/product/waydroid_arm64_only/{system,vendor}.img │
-└─────────────────────────────────────────────────────────────┘
-                            │ rsync (~20MB/s)
-                            ▼
-┌─ 平板 (arm64, waydroid 1.6.3, GNOME Wayland) ───────────────┐
-│ 5. 停 session → 换 /var/lib/waydroid/images/*.img            │
-│ 6. 清 overlay 陈旧文件（关键！见 docs/FIXES.md #stale）      │
-│ 7. 应用宿主侧图形修复 (host/)                                │
-│ 8. waydroid session start                                   │
-└─────────────────────────────────────────────────────────────┘
+```text
+scripts/avium-a16.sh [--root AOSP_ROOT] [--jobs N] [--provenance PATH] preflight|apply|build|verify|all
 ```
 
-关键约束：
-- lunch **必须**用 A16 三段式 `lunch <product> bp4a userdebug`，旧两段式报 `Argument missing`
-- ninja 用 `-j8`，23G 内存跑 `-j18` 会 OOM
-- `repo sync -l` 会抹掉 detached HEAD 上的补丁提交（历史上发生过一次）
+最短路径（在全新的 AOSP checkout 中）是：
 
-## 目录
+```bash
+repo init -u https://github.com/AviumUI/android_manifests \
+  -b 981823afd5a1c3fcf740cd3b4eeeb61331ca8304 \
+  --manifest-upstream-branch avium-16.2 --git-lfs
+mkdir -p .repo/local_manifests
+cp /path/to/aviumui-waydroid/manifests/waydroid.lock.xml .repo/local_manifests/waydroid.xml
+repo sync
+/path/to/aviumui-waydroid/scripts/avium-a16.sh --root "$PWD" all
+```
 
-| 路径 | 内容 |
-|---|---|
-| `docker/` | 构建容器（含 ncurses5 / meson / glslang / python 模块等环境修复） |
-| `manifests/waydroid.xml` | local manifest：移除 50 个 qcom SoC 项目 + cuttlefish/trusty/openwrt |
-| `scripts/resume-build.sh` | 历史现场续编脚本；会直接改源码和清理部分 generated intermediates，不是干净复现入口 |
-| `scripts/patch_appop.py` | AppOpService 修复（跳过 flag 关闭但有 app op 的权限） |
-| `scripts/patch_desktop.py` | 保留：A16 desktop/freeform 产品配置开关 |
-| `scripts/archive/` | 补丁冲突排查期的一次性脚本，留档 |
-| `archive/experiments/` | 已证伪的窗口补丁脚本（RawName/Caption 推断），见其中 README |
-| `archive/deprecated/` | 禁用的 `patch-and-build.sh`（含 `repo sync`/`reset --hard`），见其中 README |
-| `archive/build-state-20260807/` | 接手现场冻结：源码 diff + hwc 实验提交 + artifact manifest |
-| `patches/` | 树内源码改动导出（**部分待补，见 patches/README.md**） |
-| `host/` | 平板宿主侧配置与二进制 |
-| `docs/` | 修复因果链、机器拓扑、参考仓库、遗留问题 |
+`all` 依次执行输入检查、A16 release series、A16 window series、严格 final-tree 检查、`lunch`、成对镜像构建和 provenance 验证。需要分步操作时使用 `preflight`、`apply`、`build`、`verify`；正式 `build` 要求 release 与 window 两组完成 tree 同时匹配。任何 patch digest、base tree、dirty-tree 或 expected-tree 错误都会在进入编译前停止。构建命令固定为：
 
-## 文档
+```bash
+lunch lineage_waydroid_arm64_only bp4a userdebug
+m -j8 systemimage vendorimage
+```
 
-- [docs/FIXES.md](docs/FIXES.md) — 12+ 处修复各自的根因与依据（最有价值的部分）
-- [plan.md](plan.md) — 2026-08-06 现场重估、窗口方案、迁移与验收计划
-- [BUGS.md](BUGS.md) — 当前 Bug、证据与过时结论勘误
-- [docs/WINDOWING.md](docs/WINDOWING.md) — 2026-08-04 历史窗口研究（已被 plan.md 更新）
-- [docs/TOPOLOGY.md](docs/TOPOLOGY.md) — 机器、路径、常用命令
-- [docs/REFERENCES.md](docs/REFERENCES.md) — 参考仓库 URL + commit
-- [docs/ISSUES.md](docs/ISSUES.md) — 2026-08-04 前的历史遗留问题
+产物在 `out/target/product/waydroid_arm64_only/system.img` 和 `vendor.img`；默认 provenance 在 `out/avium-a16/provenance.json`，包含 manifest、local manifest、release/window series、逐项 window patch SHA-256、源码 tree、构建时间、命令和两张镜像的 SHA-256。
 
-## 历史资料
+## 文档入口
 
-早期会话转储（~1.9MB）未纳入本仓库，留在 `~/Lab/Bridge/Src/test/aviumui-waydroid/`：
-`ANALYSIS.md`、`handoff2.txt`、`research/Handoff.txt`、`2026-08-02-*.txt`
+- [`docs/SOURCES.md`](docs/SOURCES.md)：AviumUI 来源、固定 manifest 和输入锁。
+- [`docs/PORTING-A16.md`](docs/PORTING-A16.md)：Waydroid A16 补丁分类、手动移植和跳过条件。
+- [`docs/BUILD-A16.md`](docs/BUILD-A16.md)：构建机、依赖、磁盘门、构建和产物记录。
+- [`docs/FIX-LEDGER.md`](docs/FIX-LEDGER.md)：正式源码修复、环境修复、临时止血和证伪实验的账本。
+- [`docs/WINDOW-ARCHITECTURE.md`](docs/WINDOW-ARCHITECTURE.md)：三种启动来源的 per-task 窗口架构和保留/删除边界。
+- [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md)：自动检查、镜像验收和真机回归门。
+- [`docs/ARCHIVE.md`](docs/ARCHIVE.md)：历史脚本、证据和旧产物的索引与排除理由。
+
+旧研究仍可从 [`docs/COEXIST-BASELINE.md`](docs/COEXIST-BASELINE.md)、[`docs/FIXES.md`](docs/FIXES.md) 和 [`docs/WINDOWING.md`](docs/WINDOWING.md) 查阅，但它们不是新的正式入口；冲突时以源码、锁文件、构建日志和运行证据为准。

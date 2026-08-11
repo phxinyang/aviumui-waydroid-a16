@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Mon, 10 Aug 2026 00:00:00 +0000
+Subject: [PATCH] framework: keep permission and AppOp definitions consistent
+
+---
+diff --git a/core/res/AndroidManifest.xml b/core/res/AndroidManifest.xml
+index 17b2ba4cabc7..163e715d4610 100644
+--- a/core/res/AndroidManifest.xml
++++ b/core/res/AndroidManifest.xml
+@@ -2574,7 +2574,7 @@
+         android:description="@string/permdesc_ranging"
+         android:label="@string/permlab_ranging"
+         android:protectionLevel="dangerous"
+-        android:featureFlag="android.permission.flags.ranging_permission_enabled"/>
++        />
+ 
+     <!-- @SystemApi Allows an application to suspend other apps, which will prevent the
+          user from using them until they are unsuspended.
+diff --git a/services/permission/java/com/android/server/permission/access/appop/AppOpService.kt b/services/permission/java/com/android/server/permission/access/appop/AppOpService.kt
+index 73f1033f36cf..64d9d0c42e1c 100644
+--- a/services/permission/java/com/android/server/permission/access/appop/AppOpService.kt
++++ b/services/permission/java/com/android/server/permission/access/appop/AppOpService.kt
+@@ -124,11 +124,7 @@ class AppOpService(private val service: AccessCheckingService) : AppOpsCheckingS
+                 // Multiple ops might map to a single permission but only one is considered the
+                 // runtime appop calculations.
+                 if (appOpCode == AppOpsManager.permissionToOpCode(permissionName)) {
+-                    val permission =
+-                        checkNotNull(permissions[permissionName]) {
+-                            "Missing permission definition for permission \"$permissionName\"" +
+-                                " associated with app op $appOpCode"
+-                        }
++                    val permission = permissions[permissionName] ?: continue
+                     if (permission.isRuntime) {
+                         runtimePermissionNameToAppOp[permissionName] = appOpCode
+                         runtimeAppOpToPermissionNames[appOpCode] = permissionName

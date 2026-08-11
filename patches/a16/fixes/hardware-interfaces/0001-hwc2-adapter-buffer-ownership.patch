@@ -1,0 +1,84 @@
+From 0f38673133028f3195605ef1213bfc1766122c4d Mon Sep 17 00:00:00 2001
+From: xinyang <xinyang@localhost>
+Date: Fri, 7 Aug 2026 00:30:25 +0000
+Subject: [PATCH] =?UTF-8?q?=E6=98=8E=E7=A1=AE=20HWC2=20adapter=20=E7=BC=93?=
+ =?UTF-8?q?=E5=86=B2=E5=8C=BA=E6=89=80=E6=9C=89=E6=9D=83?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Change-Id: I0c7a409210dcfb0df73389842dd111843f480fb1
+---
+ .../include/hwc2on1adapter/HWC2On1Adapter.h   | 46 +++++++++++++++++--
+ 1 file changed, 42 insertions(+), 4 deletions(-)
+
+diff --git a/graphics/composer/2.1/utils/hwc2on1adapter/include/hwc2on1adapter/HWC2On1Adapter.h b/graphics/composer/2.1/utils/hwc2on1adapter/include/hwc2on1adapter/HWC2On1Adapter.h
+index 6f1fb70c1d..9ff37447e6 100644
+--- a/graphics/composer/2.1/utils/hwc2on1adapter/include/hwc2on1adapter/HWC2On1Adapter.h
++++ b/graphics/composer/2.1/utils/hwc2on1adapter/include/hwc2on1adapter/HWC2On1Adapter.h
+@@ -25,6 +25,10 @@
+ 
+ #include "MiniFence.h"
+ 
++#include <cutils/native_handle.h>
++#include <log/log.h>
++#include <unistd.h>
++
+ #include <atomic>
+ #include <map>
+ #include <memory>
+@@ -179,13 +183,47 @@ private:
+         public:
+             FencedBuffer() : mBuffer(nullptr), mFence(MiniFence::NO_FENCE) {}
+ 
+-            void setBuffer(buffer_handle_t buffer) { mBuffer = buffer; }
+-            void setFence(int fenceFd) { mFence = new MiniFence(fenceFd); }
++            void setBuffer(buffer_handle_t buffer) {
++                // HIDL/Binder owns the incoming handle only for this call.
++                // native_handle_clone() already duplicates every fd once.
++                std::lock_guard<std::mutex> lock(mMutex);
++                buffer_handle_t owned = buffer ? native_handle_clone(buffer) : nullptr;
++                if (buffer && !owned) {
++                    ALOGE("FencedBuffer: failed to clone incoming buffer handle");
++                    releaseHandle(mBuffer);
++                    mBuffer = nullptr;
++                    return;
++                }
++                releaseHandle(mBuffer);
++                mBuffer = owned;
++            }
++            void setFence(int fenceFd) {
++                std::lock_guard<std::mutex> lock(mMutex);
++                mFence = new MiniFence(fenceFd);
++            }
+ 
+-            buffer_handle_t getBuffer() const { return mBuffer; }
+-            int getFence() const { return mFence->dup(); }
++            buffer_handle_t getBuffer() const {
++                std::lock_guard<std::mutex> lock(mMutex);
++                return mBuffer;
++            }
++            int getFence() const {
++                std::lock_guard<std::mutex> lock(mMutex);
++                return mFence->dup();
++            }
++
++            ~FencedBuffer() {
++                std::lock_guard<std::mutex> lock(mMutex);
++                releaseHandle(mBuffer);
++            }
+ 
+         private:
++            static void releaseHandle(buffer_handle_t handle) {
++                if (!handle) return;
++                native_handle_close(handle);
++                native_handle_delete(const_cast<native_handle_t*>(handle));
++            }
++
++            mutable std::mutex mMutex;
+             buffer_handle_t mBuffer;
+             sp<MiniFence> mFence;
+     };
+-- 
+2.43.0
+

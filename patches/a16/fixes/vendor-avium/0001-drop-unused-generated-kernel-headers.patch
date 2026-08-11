@@ -1,0 +1,18 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Mon, 10 Aug 2026 00:00:06 +0000
+Subject: [PATCH] avium utils: drop unused generated kernel headers
+
+---
+diff --git a/utils/Android.bp b/utils/Android.bp
+index ea756d9..5fa7e4b 100644
+--- a/utils/Android.bp
++++ b/utils/Android.bp
+@@ -2,7 +2,6 @@ cc_library_shared {
+     name: "libavium_utils",
+     srcs: ["avium_utils.cpp"],
+     export_include_dirs: ["."],
+-    header_libs: ["generated_kernel_headers"],
+     recovery_available: true,
+     shared_libs: [
+         "libbase",

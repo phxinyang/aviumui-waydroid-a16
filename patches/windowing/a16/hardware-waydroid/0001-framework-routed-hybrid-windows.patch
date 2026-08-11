@@ -1,0 +1,3753 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Avium Window Reproducer <avium-window-reproducer@example.invalid>
+Date: Tue, 11 Aug 2026 01:12:00 +0800
+Subject: [PATCH] hwcomposer: add framework-routed hybrid task windows
+
+
+diff --git a/hwcomposer/Android.bp b/hwcomposer/Android.bp
+index f057bda..49b4039 100644
+--- a/hwcomposer/Android.bp
++++ b/hwcomposer/Android.bp
+@@ -37,6 +37,7 @@ cc_library_shared {
+         "vendor.waydroid.window@1.0",
+         "vendor.waydroid.window@1.1",
+         "vendor.waydroid.window@1.2",
++        "vendor.waydroid.window@1.3",
+     ],
+     static_libs: [
+         "libwayland_client_static",
+@@ -63,6 +64,7 @@ cc_library_shared {
+         "minigbm_headers",
+     ],
+     include_dirs: [
++        "external/wayland/cursor",
+         "system/core",
+         "system/core/libsync",
+         "system/core/libsync/include"
+diff --git a/hwcomposer/WaydroidWindow.cpp b/hwcomposer/WaydroidWindow.cpp
+index f45bc81..542feaa 100644
+--- a/hwcomposer/WaydroidWindow.cpp
++++ b/hwcomposer/WaydroidWindow.cpp
+@@ -29,56 +29,65 @@ namespace vendor::waydroid::window::implementation {
+ WaydroidWindow::WaydroidWindow(struct display *display)
+     : mDisplay(display)
+ {
++    mDisplay->set_task_window_state_notifier(
++            [this](const task_command& command) {
++                return notifyTaskWindowState(command);
++            });
+ }
+ 
+ static const struct zwp_relative_pointer_v1_listener relative_pointer_listener = {
+     handle_relative_motion,
+ };
+ 
++static struct window *find_window_for_identity(display *display,
++        const std::string &identity, bool fallback_to_full_ui) {
++    struct window *full_ui = nullptr;
++    for (auto& [id, candidate] : display->windows) {
++        if (!candidate)
++            continue;
++        if (candidate->taskID == "0") {
++            full_ui = candidate.get();
++            continue;
++        }
++        if (candidate->taskID == identity || candidate->appID == identity)
++            return candidate.get();
++    }
++    return fallback_to_full_ui ? full_ui : nullptr;
++}
++
+ // Methods from ::vendor::waydroid::window::V1_0::IWaydroidWindow follow.
+ Return<bool> WaydroidWindow::minimize(const hidl_string& packageName) {
+-    char property[PROPERTY_VALUE_MAX];
+-
+     if (!mDisplay->wm_base)
+         return false;
+ 
+-    property_get("waydroid.active_apps", property, "Waydroid");
+-    if (!strcmp(property, "Waydroid"))
+-        return false;
+-
+     std::scoped_lock lock(mDisplay->windowsMutex);
+-    for (auto& [id, window] : mDisplay->windows){
+-        if (window->appID == packageName) {
+-            window->minimize();
+-            return true;
+-        }
+-    }
+-    return false;
++    struct window *target = find_window_for_identity(
++            mDisplay, packageName.c_str(), false /* fallback_to_full_ui */);
++    if (!target)
++        return false;
++    target->minimize();
++    return true;
+ }
+ 
+ // Methods from ::vendor::waydroid::window::V1_1::IWaydroidWindow follow.
+ Return<void> WaydroidWindow::setPointerCapture(const hidl_string& packageName, bool enabled) {
+-    char property[PROPERTY_VALUE_MAX];
+-    std::string windowName = packageName;
+-
+     if (!mDisplay->pointer_constraints)
+         return Void();
+ 
+     if (!mDisplay->pointer)
+         return Void();
+ 
+-    property_get("waydroid.active_apps", property, "Waydroid");
+-    if (!strcmp(property, "Waydroid"))
+-        windowName = "Waydroid";
+-
+     std::scoped_lock lock(mDisplay->windowsMutex);
+-    for (auto& [id, window] : mDisplay->windows) {
+-        if (window->appID == windowName) {
+-            ALOGI("%slocking pointer for %s#%s", enabled ? "" : "un", window->appID.c_str(), window->taskID.c_str());
+-            /* Lock both the toplevel and all subsurfaces:
+-             * https://gitlab.freedesktop.org/wayland/wayland-protocols/-/issues/287
+-             */
+-            for (auto& layer : window->layers) {
++    struct window *target = find_window_for_identity(
++            mDisplay, packageName.c_str(), true /* fallback_to_full_ui */);
++    if (target) {
++        auto& window = *target;
++        ALOGI("%slocking pointer for %s#%s", enabled ? "" : "un",
++                window.appID.c_str(), window.taskID.c_str());
++        /* Lock both the toplevel and all subsurfaces:
++         * https://gitlab.freedesktop.org/wayland/wayland-protocols/-/issues/287
++         */
++        for (auto& layer : window.layers) {
+                 if (enabled && !layer.locked_pointer) {
+                     layer.locked_pointer = zwp_pointer_constraints_v1_lock_pointer(
+                             mDisplay->pointer_constraints,
+@@ -88,24 +97,24 @@ Return<void> WaydroidWindow::setPointerCapture(const hidl_string& packageName, b
+                     zwp_locked_pointer_v1_destroy(layer.locked_pointer);
+                     layer.locked_pointer = nullptr;
+                 }
+-            }
+-            if (enabled && window->dedicated_background_surface && !window->locked_pointer) {
+-                window->locked_pointer = zwp_pointer_constraints_v1_lock_pointer(
++        }
++        if (enabled && window.dedicated_background_surface && !window.locked_pointer) {
++                window.locked_pointer = zwp_pointer_constraints_v1_lock_pointer(
+                         mDisplay->pointer_constraints,
+-                        window->surface, mDisplay->pointer, nullptr,
++                        window.surface, mDisplay->pointer, nullptr,
+                         ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+-            } else if (!enabled && window->dedicated_background_surface && window->locked_pointer) {
+-                zwp_locked_pointer_v1_destroy(window->locked_pointer);
+-                window->locked_pointer = nullptr;
+-            }
++        } else if (!enabled && window.dedicated_background_surface && window.locked_pointer) {
++                zwp_locked_pointer_v1_destroy(window.locked_pointer);
++                window.locked_pointer = nullptr;
++        }
+ 
+-            if (enabled && !mDisplay->relative_pointer) {
++        if (enabled && !mDisplay->relative_pointer) {
+                 mDisplay->relative_pointer = zwp_relative_pointer_manager_v1_get_relative_pointer(
+                         mDisplay->relative_pointer_manager, mDisplay->pointer);
+                 zwp_relative_pointer_v1_add_listener(mDisplay->relative_pointer, &relative_pointer_listener, mDisplay);
+-            } else if (!enabled && mDisplay->relative_pointer) {
++        } else if (!enabled && mDisplay->relative_pointer) {
+                 bool any_locks =
+-                    window->locked_pointer ||
++                    window.locked_pointer ||
+                     std::any_of(mDisplay->windows.begin(), mDisplay->windows.end(), [](auto& pair) {
+                         return std::any_of(pair.second->layers.begin(), pair.second->layers.end(), [](auto& layer) {
+                             return layer.locked_pointer;
+@@ -115,8 +124,6 @@ Return<void> WaydroidWindow::setPointerCapture(const hidl_string& packageName, b
+                     zwp_relative_pointer_v1_destroy(mDisplay->relative_pointer);
+                     mDisplay->relative_pointer = nullptr;
+                 }
+-            }
+-            break;
+         }
+     }
+     return Void();
+@@ -124,19 +131,16 @@ Return<void> WaydroidWindow::setPointerCapture(const hidl_string& packageName, b
+ 
+ // Methods from ::vendor::waydroid::window::V1_2::IWaydroidWindow follow.
+ Return<void> WaydroidWindow::setIdleInhibit(const hidl_string& task, bool enabled) {
+-    char property[PROPERTY_VALUE_MAX];
+-    std::string taskID = task;
+-
+     if (!mDisplay->idle_manager)
+         return Void();
+ 
+-    property_get("waydroid.active_apps", property, "Waydroid");
+-    if (!strcmp(property, "Waydroid"))
+-        taskID = "0";
+-
+     std::scoped_lock lock(mDisplay->windowsMutex);
++    const std::string identity = task.c_str();
++    struct window *target = identity == "*" ? nullptr
++            : find_window_for_identity(
++                    mDisplay, identity, true /* fallback_to_full_ui */);
+     for (auto& [id, window] : mDisplay->windows) {
+-        if (window && (window->taskID == taskID || taskID == "*")) {
++        if (window && (identity == "*" || window.get() == target)) {
+             ALOGI("%sinhibiting sleep for %s#%s", enabled ? "" : "un", window->appID.c_str(), window->taskID.c_str());
+             if (enabled && window->idle_inhibitor == nullptr) {
+                 window->idle_inhibitor = zwp_idle_inhibit_manager_v1_create_inhibitor(
+@@ -151,4 +155,135 @@ Return<void> WaydroidWindow::setIdleInhibit(const hidl_string& task, bool enable
+     return Void();
+ }
+ 
++// Methods from ::vendor::waydroid::window::V1_3::IWaydroidWindow follow.
++Return<bool> WaydroidWindow::registerTaskWindowCallback(
++        const sp<IWaydroidWindowCallback>& callback) {
++    if (callback == nullptr)
++        return false;
++    {
++        std::scoped_lock lock(mTaskWindowCallbackMutex);
++        mTaskWindowCallback = callback;
++    }
++    // A new framework callback is authoritative. Drop routes from a previous
++    // SystemUI generation before it republishes the current TaskInfo set.
++    mDisplay->clear_task_window_routes();
++    mDisplay->enqueue_task_window_state_query(0);
++    return true;
++}
++
++Return<bool> WaydroidWindow::beginTaskWindowDrag(uint32_t taskID,
++        hidl_bitfield<TaskWindowDragEdge> edges) {
++    return mDisplay->begin_task_window_drag(
++            taskID, static_cast<uint32_t>(edges));
++}
++
++Return<bool> WaydroidWindow::setTaskWindowRoute(uint32_t taskID, bool enabled,
++        int32_t displayID, const hidl_string& component,
++        const hidl_string& title, const hidl_string& appID) {
++    task_window_route route;
++    route.enabled = enabled;
++    route.display_id = displayID;
++    route.component = component.c_str();
++    route.title = title.c_str();
++    route.app_id = appID.c_str();
++    return mDisplay->set_task_window_route(taskID, route);
++}
++
++Return<bool> WaydroidWindow::setTaskWindowState(uint32_t taskID,
++        TaskWindowState state, const TaskWindowBounds& restoreBounds,
++        TaskWindowStateSource source, uint64_t generation) {
++    task_window_state_update update;
++    update.task_id = taskID;
++    update.restore_bounds = {restoreBounds.left, restoreBounds.top,
++            restoreBounds.right, restoreBounds.bottom};
++    update.generation = generation;
++    switch (state) {
++        case TaskWindowState::NORMAL:
++            update.state = waydroid_task_window_state::Normal;
++            break;
++        case TaskWindowState::MAXIMIZED:
++            update.state = waydroid_task_window_state::Maximized;
++            break;
++        case TaskWindowState::MINIMIZED:
++            update.state = waydroid_task_window_state::Minimized;
++            break;
++        case TaskWindowState::FULL_UI:
++            update.state = waydroid_task_window_state::FullUi;
++            break;
++        default:
++            return false;
++    }
++    switch (source) {
++        case TaskWindowStateSource::ANDROID_FRAMEWORK:
++            update.source = waydroid_task_window_state_source::Android;
++            break;
++        case TaskWindowStateSource::HOST:
++            update.source = waydroid_task_window_state_source::Host;
++            break;
++        case TaskWindowStateSource::RECONCILE:
++            update.source = waydroid_task_window_state_source::Reconcile;
++            break;
++        default:
++            return false;
++    }
++    return mDisplay->queue_task_window_state(update);
++}
++
++bool WaydroidWindow::notifyTaskWindowState(const task_command& command) {
++    sp<IWaydroidWindowCallback> callback;
++    {
++        std::scoped_lock lock(mTaskWindowCallbackMutex);
++        callback = mTaskWindowCallback;
++    }
++    if (callback == nullptr)
++        return false;
++
++    Return<void> result;
++    if (command.type == task_command_type::WindowStateQuery) {
++        result = callback->queryTaskWindowState(command.task_id);
++    } else if (command.type == task_command_type::WindowBoundsRequest) {
++        TaskWindowBounds bounds;
++        bounds.left = command.window_bounds.left;
++        bounds.top = command.window_bounds.top;
++        bounds.right = command.window_bounds.right;
++        bounds.bottom = command.window_bounds.bottom;
++        result = callback->requestTaskWindowBounds(command.task_id, bounds,
++                command.drag_resizing, command.generation);
++    } else if (command.type == task_command_type::WindowStateRequest) {
++        TaskWindowBounds bounds;
++        bounds.left = command.window_bounds.left;
++        bounds.top = command.window_bounds.top;
++        bounds.right = command.window_bounds.right;
++        bounds.bottom = command.window_bounds.bottom;
++        TaskWindowState state = TaskWindowState::NORMAL;
++        switch (command.window_state) {
++            case waydroid_task_window_state::Normal:
++                state = TaskWindowState::NORMAL;
++                break;
++            case waydroid_task_window_state::Maximized:
++                state = TaskWindowState::MAXIMIZED;
++                break;
++            case waydroid_task_window_state::Minimized:
++                state = TaskWindowState::MINIMIZED;
++                break;
++            case waydroid_task_window_state::FullUi:
++                state = TaskWindowState::FULL_UI;
++                break;
++        }
++        result = callback->requestTaskWindowState(command.task_id, state,
++                bounds, command.generation);
++    } else {
++        return false;
++    }
++    if (result.isOk())
++        return true;
++    ALOGE("task-window callback failed: %s", result.description().c_str());
++    {
++        std::scoped_lock lock(mTaskWindowCallbackMutex);
++        if (mTaskWindowCallback == callback)
++            mTaskWindowCallback = nullptr;
++    }
++    return false;
++}
++
+ }  // namespace vendor::waydroid::window::implementation
+diff --git a/hwcomposer/WaydroidWindow.h b/hwcomposer/WaydroidWindow.h
+index 8e7592c..4bc845e 100644
+--- a/hwcomposer/WaydroidWindow.h
++++ b/hwcomposer/WaydroidWindow.h
+@@ -16,7 +16,8 @@
+ 
+ #pragma once
+ 
+-#include <vendor/waydroid/window/1.2/IWaydroidWindow.h>
++#include <vendor/waydroid/window/1.3/IWaydroidWindow.h>
++#include <vendor/waydroid/window/1.3/IWaydroidWindowCallback.h>
+ #include <hidl/MQDescriptor.h>
+ #include <hidl/Status.h>
+ 
+@@ -25,14 +26,20 @@
+ namespace vendor::waydroid::window::implementation {
+ 
+ using ::android::hardware::hidl_array;
++using ::android::hardware::hidl_bitfield;
+ using ::android::hardware::hidl_memory;
+ using ::android::hardware::hidl_string;
+ using ::android::hardware::hidl_vec;
+ using ::android::hardware::Return;
+ using ::android::hardware::Void;
+ using ::android::sp;
++using V1_3::IWaydroidWindowCallback;
++using V1_3::TaskWindowBounds;
++using V1_3::TaskWindowDragEdge;
++using V1_3::TaskWindowState;
++using V1_3::TaskWindowStateSource;
+ 
+-struct WaydroidWindow : public V1_2::IWaydroidWindow {
++struct WaydroidWindow : public V1_3::IWaydroidWindow {
+   public:
+     WaydroidWindow(struct display *display);
+     // Methods from ::vendor::waydroid::window::V1_0::IWaydroidWindow follow.
+@@ -43,8 +50,23 @@ struct WaydroidWindow : public V1_2::IWaydroidWindow {
+ 
+     // Methods from ::vendor::waydroid::window::V1_2::IWaydroidWindow follow.
+     Return<void> setIdleInhibit(const hidl_string& packageName, bool enabled) override;
++
++    // Methods from ::vendor::waydroid::window::V1_3::IWaydroidWindow follow.
++    Return<bool> registerTaskWindowCallback(
++            const sp<IWaydroidWindowCallback>& callback) override;
++    Return<bool> beginTaskWindowDrag(uint32_t taskID,
++            hidl_bitfield<TaskWindowDragEdge> edges) override;
++    Return<bool> setTaskWindowRoute(uint32_t taskID, bool enabled,
++            int32_t displayID, const hidl_string& component,
++            const hidl_string& title, const hidl_string& appID) override;
++    Return<bool> setTaskWindowState(uint32_t taskID, TaskWindowState state,
++            const TaskWindowBounds& restoreBounds,
++            TaskWindowStateSource source, uint64_t generation) override;
+   private:
++    bool notifyTaskWindowState(const task_command& command);
+     struct display *mDisplay;
++    std::mutex mTaskWindowCallbackMutex;
++    sp<IWaydroidWindowCallback> mTaskWindowCallback;
+ };
+ 
+ }  // namespace vendor::waydroid::window::implementation
+diff --git a/hwcomposer/gralloc_handler.cpp b/hwcomposer/gralloc_handler.cpp
+index 4f0e303..cd29a3d 100644
+--- a/hwcomposer/gralloc_handler.cpp
++++ b/hwcomposer/gralloc_handler.cpp
+@@ -68,6 +68,13 @@ namespace {
+         [](void *, struct wl_buffer *) {}
+     };
+ }
++static bool own_buffer_handle(buffer *buf, buffer_handle_t handle) {
++    buf->handle = native_handle_clone(handle);
++    if (buf->handle) return true;
++    ALOGE("failed to clone gralloc buffer handle");
++    return false;
++}
++
+ std::unique_ptr<buffer> create_shm_wl_buffer(display *display, const buffer_metadata& metadata, buffer_handle_t handle) {
+     std::unique_ptr<buffer> buf { new buffer() };
+ 
+@@ -76,7 +83,7 @@ std::unique_ptr<buffer> create_shm_wl_buffer(display *display, const buffer_meta
+     int size = shm_stride * metadata.height;
+ 
+     buf->metadata = metadata;
+-    buf->handle = handle;
++    if (!own_buffer_handle(buf.get(), handle)) return nullptr;
+ 
+     buf->isShm = true;
+     buf->size = size;
+@@ -84,14 +91,21 @@ std::unique_ptr<buffer> create_shm_wl_buffer(display *display, const buffer_meta
+     auto shm_format = ConvertHalFormatToShm(metadata.format);
+     assert(shm_format >= 0);
+ 
++    // Always create a fresh memfd: pooled fds get rejected by the compositor
++    // ("failed mmap fd N: 权限不够") and would drop the window content.
+     int fd = syscall(SYS_memfd_create, "buffer", MFD_ALLOW_SEALING);
++    if (fd < 0) {
++        ALOGE("memfd_create failed");
++        return nullptr;
++    }
+     ftruncate(fd, size);
+-    buf->shm_data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+-    if (buf->shm_data == MAP_FAILED) {
++    void *map = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
++    if (map == MAP_FAILED) {
+         ALOGE("mmap failed");
+         close(fd);
+         return nullptr;
+     }
++    buf->shm_data = map;
+     struct wl_shm_pool *pool = wl_shm_create_pool(display->shm, fd, size);
+     buf->wl_buffer = wl_shm_pool_create_buffer(pool, 0, metadata.width, metadata.height, shm_stride, shm_format);
+     wl_buffer_add_listener(buf->wl_buffer, &buffer_listener, nullptr);
+@@ -164,23 +178,26 @@ namespace {
+     }
+ }
+ std::unique_ptr<buffer> create_dmabuf_wl_buffer(display *display, const buffer_metadata& metadata,
+-                                                                int prime_fd, int drm_format, int byte_stride,
+-                                                                int offset, uint64_t modifier, buffer_handle_t handle)
++                                                                int drm_format, int byte_stride, int offset,
++                                                                uint64_t modifier, buffer_handle_t handle)
+ {
+-    assert(prime_fd >= 0);
+-
+     std::unique_ptr<buffer> buf { new buffer() };
+ 
+     buf->metadata = metadata;
+-    buf->handle = handle;
++    if (!own_buffer_handle(buf.get(), handle)) return nullptr;
+ 
+     if (drm_format < 0) {
+         drm_format = ConvertHalFormatToDrm(display, metadata.format);
+     }
+     assert(drm_format >= 0);
+ 
++    const int owned_fd = buf->handle->data[0];
++    if (owned_fd < 0 || fcntl(owned_fd, F_GETFD) == -1) {
++        ALOGE("create_dmabuf_wl_buffer: cloned handle has no live plane fd");
++        return nullptr;
++    }
+     zwp_linux_buffer_params_v1 *params = zwp_linux_dmabuf_v1_create_params(display->dmabuf);
+-    zwp_linux_buffer_params_v1_add(params, prime_fd, 0, offset, byte_stride, modifier >> 32, modifier & 0xffffffff);
++    zwp_linux_buffer_params_v1_add(params, owned_fd, 0, offset, byte_stride, modifier >> 32, modifier & 0xffffffff);
+     zwp_linux_buffer_params_v1_add_listener(params, &params_listener, nullptr);
+ 
+     buf->wl_buffer = zwp_linux_buffer_params_v1_create_immed(params, buf->metadata.width, buf->metadata.height, drm_format, 0);
+@@ -199,7 +216,7 @@ std::unique_ptr<buffer> create_android_wl_buffer(display *display, const buffer_
+     std::unique_ptr<buffer> buf { new buffer() };
+ 
+     buf->metadata = metadata;
+-    buf->handle = handle;
++    if (!own_buffer_handle(buf.get(), handle)) return nullptr;
+ 
+     struct wl_array ints;
+     wl_array_init(&ints);
+@@ -259,7 +276,7 @@ buffer_metadata get_buffer_metadata_generic(display *display, hwc_layer_1_t *lay
+     if (!height)
+         height = layer->displayFrame.bottom - layer->displayFrame.top;
+ 
+-    return {height, width, pixel_stride, format};
++    return {height, width, pixel_stride, format, 0};
+ }
+ buffer_metadata get_buffer_metadata_gbm(display *, hwc_layer_1_t *layer, size_t) {
+     auto handle = reinterpret_cast<const gralloc_handle_t *>(layer->handle);
+@@ -267,7 +284,8 @@ buffer_metadata get_buffer_metadata_gbm(display *, hwc_layer_1_t *layer, size_t)
+             handle->height,
+             handle->width,
+             handle->stride,
+-            handle->format
++            handle->format,
++            0
+     };
+ }
+ buffer_metadata get_buffer_metadata_cros(display *, hwc_layer_1_t *layer, size_t) {
+@@ -276,7 +294,8 @@ buffer_metadata get_buffer_metadata_cros(display *, hwc_layer_1_t *layer, size_t
+             handle->height,
+             handle->width,
+             handle->pixel_stride,
+-            static_cast<uint32_t>(handle->droid_format)
++            static_cast<uint32_t>(handle->droid_format),
++            handle->id
+     };
+ }
+ 
+@@ -285,12 +304,32 @@ std::unique_ptr<buffer> create_buffer_generic(display *display, const buffer_met
+ }
+ std::unique_ptr<buffer> create_buffer_gbm(display *display, const buffer_metadata& metadata, buffer_handle_t handle) {
+     auto *drm_handle = reinterpret_cast<const gralloc_handle_t *>(handle);
+-    return create_dmabuf_wl_buffer(display, metadata, drm_handle->prime_fd, -1 /* compute drm format */, drm_handle->stride, 0 /* offset */, drm_handle->modifier, handle);
++    auto buf = create_dmabuf_wl_buffer(display, metadata,
++            -1 /* compute drm format */, drm_handle->stride,
++            0 /* offset */, drm_handle->modifier, handle);
++    if (!buf) {
++        // prime_fd invalid (buffer recycled by SurfaceFlinger). Fall back to SHM so the
++        // window still renders instead of being dropped (black/invisible window).
++        ALOGI("create_buffer_gbm: dmabuf fd invalid, SHM fallback");
++        return create_shm_wl_buffer(display, metadata, handle);
++    }
++    return buf;
+ }
+ std::unique_ptr<buffer> create_buffer_cros(display *display, const buffer_metadata& metadata, buffer_handle_t handle) {
+     auto *cros_handle = reinterpret_cast<const cros_gralloc_handle *>(handle);
+-    return create_dmabuf_wl_buffer(display, metadata, cros_handle->fds[0], cros_handle->format, cros_handle->strides[0], cros_handle->offsets[0], cros_handle->format_modifier, handle);
++    auto buf = create_dmabuf_wl_buffer(display, metadata, cros_handle->format,
++            cros_handle->strides[0], cros_handle->offsets[0],
++            cros_handle->format_modifier, handle);
++    if (!buf) {
++        ALOGI("create_buffer_cros: dmabuf fd invalid, SHM fallback");
++        return create_shm_wl_buffer(display, metadata, handle);
++    }
++    return buf;
+ }
++
++
++
++
+ std::unique_ptr<buffer> create_buffer_android(display *display, const buffer_metadata& metadata, buffer_handle_t handle) {
+     return create_android_wl_buffer(display, metadata, handle);
+ }
+@@ -319,14 +358,25 @@ void update_shm_buffer_default(display *, buffer *buffer) {
+             uint32_t* dist = (uint32_t*)buffer->shm_data + (i * shm_stride);
+             uint32_t* end = dist + shm_stride;
+ 
+-            while (dist < end) {
++            // RGBA8888 -> ARGB8888: swap R and B bytes, 2 pixels per iteration.
++            while (dist + 1 < end) {
++                uint64_t c = *(const uint64_t*)source;
++                uint64_t rb = (c >> 16) & 0x000000FF000000FFULL;   // B bytes -> R slots
++                uint64_t br = (c << 16) & 0x00FF000000FF0000ULL;   // R bytes -> B slots
++                uint64_t ga = c & 0xFF00FF00FF00FF00ULL;           // G/A unchanged
++                *(uint64_t*)dist = rb | br | ga;
++                source += 2;
++                dist += 2;
++            }
++            if (dist < end) {
+                 uint32_t c = *source;
+                 *dist = (c & 0xFF00FF00) | ((c & 0xFF0000) >> 16) | ((c & 0xFF) << 16);
+-                source++;
+-                dist++;
+             }
+         }
+         android::GraphicBufferMapper::get().unlock(buffer->handle);
++    } else {
++        ALOGE("update_shm_buffer: GraphicBufferMapper lock failed for handle=%p %ux%u",
++              buffer->handle, buffer->metadata.width, buffer->metadata.height);
+     }
+ }
+ }
+diff --git a/hwcomposer/gralloc_handler.h b/hwcomposer/gralloc_handler.h
+index 1d045e3..113d1bc 100644
+--- a/hwcomposer/gralloc_handler.h
++++ b/hwcomposer/gralloc_handler.h
+@@ -32,8 +32,8 @@
+ 
+ std::unique_ptr<buffer> create_shm_wl_buffer(display *display, const buffer_metadata& metadata, buffer_handle_t handle);
+ std::unique_ptr<buffer> create_dmabuf_wl_buffer(display *display, const buffer_metadata& metadata,
+-                                                                int prime_fd, int format, int byte_stride,
+-                                                                int offset, uint64_t modifier, buffer_handle_t handle);
++                                                                int format, int byte_stride, int offset,
++                                                                uint64_t modifier, buffer_handle_t handle);
+ std::unique_ptr<buffer> create_android_wl_buffer(display *display, const buffer_metadata& metadata, buffer_handle_t target);
+ 
+ 
+diff --git a/hwcomposer/hwcomposer.cpp b/hwcomposer/hwcomposer.cpp
+index 9a14221..0f1ffee 100644
+--- a/hwcomposer/hwcomposer.cpp
++++ b/hwcomposer/hwcomposer.cpp
+@@ -23,12 +23,17 @@
+ #include <stdlib.h>
+ #include <sys/time.h>
+ #include <sys/resource.h>
++#include <sys/mman.h>
++#include <sys/syscall.h>
+ #include <unistd.h>
++#pragma clang diagnostic push
++#pragma clang diagnostic ignored "-Wwritable-strings"
++#include "cursor-data.h"
++#pragma clang diagnostic pop
+ #include <wayland-client.h>
+ #include <sys/socket.h>
+ #include <sys/un.h>
+ #include <string>
+-#include <sstream>
+ #include <functional>
+ 
+ #include <log/log.h>
+@@ -61,7 +66,7 @@ using ::android::hardware::joinRpcThreadpool;
+ 
+ using ::vendor::waydroid::display::V1_2::IWaydroidDisplay;
+ using ::vendor::waydroid::display::V1_2::implementation::WaydroidDisplay;
+-using ::vendor::waydroid::window::V1_1::IWaydroidWindow;
++using ::vendor::waydroid::window::V1_3::IWaydroidWindow;
+ using ::vendor::waydroid::window::implementation::WaydroidWindow;
+ using ::vendor::waydroid::clipboard::V1_0::IWaydroidClipboard;
+ using ::vendor::waydroid::clipboard::implementation::WaydroidClipboard;
+@@ -85,8 +90,14 @@ namespace {
+         return src;
+     }
+ 
++    uint64_t get_buffer_cache_key(const buffer_metadata &metadata, buffer_handle_t handle) {
++        return metadata.buffer_id != 0
++                ? metadata.buffer_id
++                : static_cast<uint64_t>(reinterpret_cast<uintptr_t>(handle));
++    }
++
+     buffer *find_cached_buffer(waydroid_hwc_composer_device_1 *pdev, const buffer_metadata &metadata, buffer_handle_t handle) {
+-        auto it = pdev->display->buffer_map.find(handle);
++        auto it = pdev->display->buffer_map.find(get_buffer_cache_key(metadata, handle));
+         if (it != pdev->display->buffer_map.end()) {
+             /* FIXME We can't be sure that our cached buffer actually refers to the buffer corresponding to the given handle
+              * It's possible that a new buffer got the same handle after the old one was destroyed
+@@ -127,7 +138,8 @@ namespace {
+                 ALOGE("failed to create a wayland buffer");
+                 return nullptr;
+             }
+-            auto emplace_result = pdev->display->buffer_map.emplace(layer->handle, std::move(result));
++            auto emplace_result = pdev->display->buffer_map.emplace(
++                    get_buffer_cache_key(metadata, layer->handle), std::move(result));
+             assert(emplace_result.second);
+             buf = emplace_result.first->second.get();
+         }
+@@ -156,6 +168,17 @@ namespace {
+             }
+         }
+ 
++        if (active_apps == "Waydroid")
++            pdev->display->set_full_ui_requested(true);
++
++        // In multi-window-capable A16 builds this is always the hybrid
++        // compositor. active_apps is only a full-UI lifecycle hint; it is not
++        // a task set and cannot select or classify external windows.
++        if (pdev->multi_windows) {
++            assert(pdev->should_compose);
++            return std::make_unique<multi_window_mode>();
++        }
++
+         /*
+          * In prop "persist.waydroid.multi_windows" we detect HWC let SF render layers
+          * And just show the target client layer (single windows mode) or
+@@ -178,15 +201,12 @@ namespace {
+             } else {
+                 mode = new non_compositing_full_ui_mode();
+             }
+-        } else if (!pdev->multi_windows) {
++        } else {
+             if (pdev->should_compose) {
+                 mode = new compositing_single_window_mode();
+             } else {
+                 mode = new non_compositing_single_window_mode();
+             }
+-        } else {
+-            assert(pdev->should_compose);
+-            mode = new multi_window_mode();
+         }
+         return std::unique_ptr<waydroid_mode>(mode);
+     }
+@@ -318,14 +338,6 @@ static const struct wp_presentation_feedback_listener feedback_listener = {
+     feedback_discarded
+ };
+ 
+-bool is_blacklisted(struct waydroid_hwc_composer_device_1* pdev, const std::string &app_id, const std::string &component) {
+-    auto match = pdev->blacklisted_apps.find(app_id);
+-    if (match == pdev->blacklisted_apps.end())
+-        return false;
+-    auto &components = match->second;
+-    return components.empty() || std::find(components.begin(), components.end(), component) != components.end();
+-}
+-
+ static void apply_surface_damage(hwc_layer_1 *hwc_layer, surface_context &surface_context) {
+     auto &surface_damage = hwc_layer->surfaceDamage;
+ 
+@@ -390,7 +402,7 @@ out:
+     return res;
+ }
+ 
+-int apply_hwc_layer_to_window(waydroid_hwc_composer_device_1 *pdev, hwc_layer_1 *hwc_layer, size_t hwc_layer_index, window *window) {
++int apply_hwc_layer_to_window(waydroid_hwc_composer_device_1 *pdev, hwc_layer_1 *hwc_layer, size_t hwc_layer_index, window *window, bool primary_layer) {
+     buffer *buf = get_wl_buffer(pdev, hwc_layer, hwc_layer_index);
+     if (!buf) {
+         ALOGE("Failed to get wayland buffer");
+@@ -400,31 +412,63 @@ int apply_hwc_layer_to_window(waydroid_hwc_composer_device_1 *pdev, hwc_layer_1
+         return -1;
+     }
+ 
+-    auto &window_layer = window->get_next_layer();
++    // The xdg parent is a geometry-only task carrier.  Android buffers
++    // always use child subsurfaces so app surfaceInsets cannot redefine
++    // the host window geometry.
++    window::layer *window_layer = nullptr;
++    surface_context *target = nullptr;
++    window_layer = &window->get_next_layer();
++    target = static_cast<surface_context *>(window_layer);
+ 
+-    if (apply_hwc_layer_to_surface_context(pdev, hwc_layer, hwc_layer_index, window_layer, buf) != 0) {
++    if (apply_hwc_layer_to_surface_context(pdev, hwc_layer, hwc_layer_index, *target, buf) != 0) {
+         return -1;
+     }
+ 
+-    window_layer.set_position(
+-        floor(hwc_layer->displayFrame.left / pdev->display->scale),
+-        floor(hwc_layer->displayFrame.top / pdev->display->scale)
+-    );
++    const bool task_local = window->task_bounds_valid
++            || window->layer_origin_valid;
++    const int origin_x = window->task_bounds_valid
++            ? window->task_left : window->layer_origin_x;
++    const int origin_y = window->task_bounds_valid
++            ? window->task_top : window->layer_origin_y;
++    const int local_x = floor((hwc_layer->displayFrame.left - origin_x)
++            / pdev->display->scale);
++    const int local_y = floor((hwc_layer->displayFrame.top - origin_y)
++            / pdev->display->scale);
++
++    if (primary_layer)
++        window->primary_layer_submitted = true;
++    window_layer->set_position(local_x, local_y);
+ 
+     if (window->input_region) {
++        const int outset = task_local ? 0 : WINDOW_DECORATION_OUTSET;
+         wl_region_add(window->input_region,
+-                      -WINDOW_DECORATION_OUTSET + floor(hwc_layer->displayFrame.left / pdev->display->scale),
+-                      -WINDOW_DECORATION_OUTSET + floor(hwc_layer->displayFrame.top / pdev->display->scale),
+-                      2*WINDOW_DECORATION_OUTSET + ceil((hwc_layer->displayFrame.right - hwc_layer->displayFrame.left) / pdev->display->scale),
+-                      2*WINDOW_DECORATION_OUTSET + ceil((hwc_layer->displayFrame.bottom - hwc_layer->displayFrame.top) / pdev->display->scale));
++                      local_x - outset, local_y - outset,
++                      2 * outset + ceil((hwc_layer->displayFrame.right
++                              - hwc_layer->displayFrame.left)
++                              / pdev->display->scale),
++                      2 * outset + ceil((hwc_layer->displayFrame.bottom
++                              - hwc_layer->displayFrame.top)
++                              / pdev->display->scale));
+     }
+ 
+-    pdev->display->layers[window_layer.surface] = {
+-            .x = hwc_layer->displayFrame.left,
+-            .y = hwc_layer->displayFrame.top };
++    {
++        std::scoped_lock input_lock(pdev->display->input_state_mutex);
++        if (window_layer) {
++            pdev->display->layers[window_layer->surface] = {
++                    .x = hwc_layer->displayFrame.left,
++                    .y = hwc_layer->displayFrame.top,
++                    .owner_task_id = window->taskID };
++        }
++        // Pointer/touch events may arrive on the parent transparent
++        // surface, so keep its Android-space origin in the same map.
++        pdev->display->layers[window->surface] = {
++                .x = origin_x, .y = origin_y,
++                .owner_task_id = window->taskID };
++    }
+ 
+     if (window->display->presentation) {
+-        auto feedback = wp_presentation_feedback(window->display->presentation, window_layer.surface);
++        auto feedback = wp_presentation_feedback(window->display->presentation,
++                window_layer ? window_layer->surface : window->surface);
+         wp_presentation_feedback_add_listener(feedback,&feedback_listener, pdev);
+     }
+ 
+@@ -442,6 +486,31 @@ static void reset_per_commit_state_window(waydroid_hwc_composer_device_1 *pdev)
+     }
+ }
+ 
++static void process_pending_task_configures(waydroid_hwc_composer_device_1 *pdev) {
++    // Host xdg configure must reach Android in both geometry modes.
++    for (auto& [id, window] : pdev->display->windows) {
++        int32_t width = 0;
++        int32_t height = 0;
++        if (window->take_task_configure(&width, &height))
++            window->handle_task_configure(width, height);
++    }
++}
++
++static void process_pending_task_window_states(
++        waydroid_hwc_composer_device_1 *pdev) {
++    const auto updates = pdev->display->take_pending_task_window_states();
++    for (const auto &update : updates) {
++        for (auto &[id, window] : pdev->display->windows) {
++            uint32_t task_id = 0;
++            if (window->get_numeric_task_id(&task_id)
++                    && task_id == update.task_id) {
++                window->apply_task_window_state(update);
++                break;
++            }
++        }
++    }
++}
++
+ static int hwc_set(struct hwc_composer_device_1* dev,size_t numDisplays,
+                    hwc_display_contents_1_t** displays) {
+     if (HWC_DISPLAY_PRIMARY >= numDisplays || !displays)
+@@ -463,6 +532,8 @@ static int hwc_set(struct hwc_composer_device_1* dev,size_t numDisplays,
+     mode->cleanup_stale_windows(pdev, contents);
+ 
+     reset_per_commit_state_window(pdev);
++    process_pending_task_window_states(pdev);
++    process_pending_task_configures(pdev);
+ 
+     bool found_cursor = false;
+     for (size_t l = 0; l < contents->numHwLayers; l++) {
+@@ -745,19 +816,6 @@ static int hwc_open(const struct hw_module_t* module, const char* name,
+     pdev->timeline_fd = sw_sync_timeline_create();
+     pdev->next_sync_point = 1;
+ 
+-    pdev->blacklisted_apps["com.android.launcher3"] = {};
+-    pdev->blacklisted_apps["com.android.settings"] = {"com.android.settings.FallbackHome"};
+-    pdev->blacklisted_apps["com.android.tv.settings"] = {"com.android.tv.settings.system.FallbackHome"};
+-    pdev->blacklisted_apps["com.google.android.tvlauncher"] = {};
+-    if (property_get("waydroid.blacklist_apps", property, nullptr) > 0) {
+-        std::string blacklist_apps = std::string(property);
+-        std::istringstream iss(blacklist_apps);
+-        std::string app;
+-        while (std::getline(iss, app, ':')) {
+-            pdev->blacklisted_apps[app] = {};
+-        }
+-    }
+-
+     if (property_get("waydroid.xdg_runtime_dir", property, "/run/user/1000") > 0) {
+         setenv("XDG_RUNTIME_DIR", property, 1);
+     }
+@@ -771,6 +829,11 @@ static int hwc_open(const struct hw_module_t* module, const char* name,
+         ALOGE("failed to open wayland connection");
+         return -ENODEV;
+     }
++    pdev->display->full_ui_requested =
++            property_get_bool("waydroid.full_ui_active", false)
++            || property_get_string("waydroid.active_apps", "none") == "Waydroid";
++    if (pdev->display->full_ui_requested)
++        property_set("waydroid.full_ui_active", "true");
+     ALOGE("wayland display %p", pdev->display);
+ 
+     pdev->gralloc_handler = gralloc_handler(pdev->display);
+@@ -793,10 +856,12 @@ static int hwc_open(const struct hw_module_t* module, const char* name,
+ 
+     auto first_window = window::create(pdev->display, pdev->should_compose, "Waydroid", "0", {0, 0, 0, 255});
+     if (!property_get_bool("waydroid.background_start", true)) {
++        pdev->display->full_ui_requested = true;
++        property_set("waydroid.full_ui_active", "true");
+         pdev->display->windows.add("Waydroid", std::move(first_window));
+         property_set("waydroid.active_apps", "Waydroid");
+     } else {
+-        first_window.reset();
++        pdev->display->retire_window(std::move(first_window));
+     }
+ 
+     pdev->vsync_callback_enabled = true;
+@@ -911,6 +976,82 @@ wl_cursor_cursor_handler::wl_cursor_cursor_handler(waydroid_hwc_composer_device_
+         cursor_surface_context.viewport =
+                 wp_viewporter_get_viewport(pdev->display->viewporter, cursor_surface_context.surface);
+     }
++
++    constexpr int width = 48;
++    constexpr int height = 48;
++    constexpr int stride = width * 4;
++    fallback_size = stride * height;
++    const int fd = syscall(SYS_memfd_create, "waydroid-host-cursor", 0);
++    if (fd < 0 || ftruncate(fd, fallback_size) != 0) {
++        ALOGE("failed to allocate host cursor fallback: %s", strerror(errno));
++        if (fd >= 0)
++            close(fd);
++        return;
++    }
++    fallback_data = mmap(nullptr, fallback_size, PROT_READ | PROT_WRITE,
++            MAP_SHARED, fd, 0);
++    if (fallback_data == MAP_FAILED) {
++        ALOGE("failed to map host cursor fallback: %s", strerror(errno));
++        fallback_data = nullptr;
++        close(fd);
++        return;
++    }
++
++    auto *pixels = static_cast<uint32_t *>(fallback_data);
++    // Wayland generated left_ptr asset, only for no-layer frames.
++    constexpr int source_width = 10;
++    constexpr int source_height = 16;
++    constexpr int source_scale = 3;
++    constexpr size_t source_offset = 1008; // cursor_metadata.left_ptr
++    for (int y = 0; y < source_height; ++y) {
++        for (int x = 0; x < source_width; ++x) {
++            const uint32_t pixel = cursor_data[source_offset + y * source_width + x];
++            for (int dy = 0; dy < source_scale; ++dy) {
++                for (int dx = 0; dx < source_scale; ++dx) {
++                    pixels[(y * source_scale + dy) * width
++                            + x * source_scale + dx] = pixel;
++                }
++            }
++        }
++    }
++
++    wl_shm_pool *pool = wl_shm_create_pool(pdev->display->shm, fd, fallback_size);
++    fallback_buffer = wl_shm_pool_create_buffer(pool, 0, width, height,
++            stride, WL_SHM_FORMAT_ARGB8888);
++    wl_shm_pool_destroy(pool);
++    close(fd);
++    show_fallback(pdev->display);
++}
++
++wl_cursor_cursor_handler::~wl_cursor_cursor_handler() {
++    if (fallback_buffer)
++        wl_buffer_destroy(fallback_buffer);
++    if (fallback_data)
++        munmap(fallback_data, fallback_size);
++    if (cursor_surface_context.viewport)
++        wp_viewport_destroy(cursor_surface_context.viewport);
++    if (cursor_surface_context.surface)
++        wl_surface_destroy(cursor_surface_context.surface);
++}
++
++void wl_cursor_cursor_handler::show_fallback(display *display) {
++    if (!fallback_buffer || !cursor_surface_context.surface)
++        return;
++    wl_surface_attach(cursor_surface_context.surface, fallback_buffer, 0, 0);
++    wl_surface_damage(cursor_surface_context.surface, 0, 0, 48, 48);
++    if (cursor_surface_context.viewport) {
++        wp_viewport_set_source(cursor_surface_context.viewport,
++                wl_fixed_from_int(0), wl_fixed_from_int(0),
++                wl_fixed_from_int(48), wl_fixed_from_int(48));
++        wp_viewport_set_destination(cursor_surface_context.viewport, 24, 24);
++    }
++    wl_surface_commit(cursor_surface_context.surface);
++    android_cursor_active = false;
++    fallback_visible = true;
++    if (display->pointer) {
++        wl_pointer_set_cursor(display->pointer, display->pointer_enter_serial,
++                cursor_surface_context.surface, 1, 1);
++    }
+ }
+ 
+ std::unique_ptr<buffer> wl_cursor_cursor_handler::create_buffer(waydroid_hwc_composer_device_1* pdev, const buffer_metadata& metadata, hwc_layer_1 *hwc_layer) {
+@@ -934,23 +1075,24 @@ int wl_cursor_cursor_handler::apply_cursor(waydroid_hwc_composer_device_1* pdev,
+             ALOGE("Failed to prepare cursur surface");
+             return -1;
+         }
++        android_cursor_active = true;
++        fallback_visible = false;
+         set_cursor(pdev->display);
+     }
+     return 0;
+ }
+ 
+ int wl_cursor_cursor_handler::reset_cursor(waydroid_hwc_composer_device_1* pdev) {
+-    if (pdev->display->pointer) {
+-        wl_pointer_set_cursor(pdev->display->pointer, pdev->display->pointer_enter_serial,
+-                              nullptr,
+-                              0,
+-                              0);
+-    }
++    if (android_cursor_active)
++        show_fallback(pdev->display);
+     return 0;
+ }
+ 
+ int wl_cursor_cursor_handler::on_cursor_enter(display* display) {
+-    set_cursor(display);
++    if (android_cursor_active)
++        set_cursor(display);
++    else
++        show_fallback(display);
+     return 0;
+ }
+ 
+diff --git a/hwcomposer/hwcomposer.h b/hwcomposer/hwcomposer.h
+index b147f38..d4e4daa 100644
+--- a/hwcomposer/hwcomposer.h
++++ b/hwcomposer/hwcomposer.h
+@@ -48,9 +48,17 @@ class subsurface_cursor_handler : public cursor_handler {
+ 
+ class wl_cursor_cursor_handler : public cursor_handler {
+     surface_context cursor_surface_context {};
++    struct wl_buffer *fallback_buffer = nullptr;
++    void *fallback_data = nullptr;
++    size_t fallback_size = 0;
++    bool android_cursor_active = false;
++    bool fallback_visible = false;
++
++    void show_fallback(display *display);
+ 
+   public:
+     wl_cursor_cursor_handler(waydroid_hwc_composer_device_1 *pdev);
++    ~wl_cursor_cursor_handler() override;
+ 
+     std::unique_ptr<buffer> create_buffer(waydroid_hwc_composer_device_1 *pdev, const buffer_metadata& metadata, hwc_layer_1 *hwc_layer) override;
+     void set_cursor(display *display) const;
+@@ -68,8 +76,6 @@ struct waydroid_hwc_composer_device_1 : hwc_composer_device_1_t {
+     struct display *display;         // constant after init
+     gralloc_handler gralloc_handler; // constant after init
+ 
+-    std::map<std::string, std::vector<std::string>> blacklisted_apps;
+-
+     std::atomic<bool> vsync_callback_enabled;
+     std::atomic<uint64_t> last_vsync_ns;
+ 
+@@ -81,5 +87,4 @@ struct waydroid_hwc_composer_device_1 : hwc_composer_device_1_t {
+     std::unique_ptr<waydroid_mode> selected_mode;
+ };
+ 
+-int apply_hwc_layer_to_window(waydroid_hwc_composer_device_1 *pdev, hwc_layer_1 *hwc_layer, size_t hwc_layer_index, window *window);
+-bool is_blacklisted(struct waydroid_hwc_composer_device_1* pdev, const std::string &app_id, const std::string &component);
++int apply_hwc_layer_to_window(waydroid_hwc_composer_device_1 *pdev, hwc_layer_1 *hwc_layer, size_t hwc_layer_index, window *window, bool primary_layer = false);
+diff --git a/hwcomposer/modes/multi-window.cpp b/hwcomposer/modes/multi-window.cpp
+index bfc251a..4aedfb3 100644
+--- a/hwcomposer/modes/multi-window.cpp
++++ b/hwcomposer/modes/multi-window.cpp
+@@ -28,32 +28,103 @@
+ #include <log/log.h>
+ #include <cutils/properties.h>
+ 
++#include <cerrno>
++#include <cstdlib>
++#include <limits>
++
+ constexpr hwc_color_t color_transparent = {0, 0, 0, 0};
+ 
++static bool parse_task_id(const std::string &text, uint32_t *task_id) {
++    if (!task_id || text.empty()
++            || text.find_first_not_of("0123456789") != std::string::npos) {
++        return false;
++    }
++    errno = 0;
++    char *end = nullptr;
++    const unsigned long value = strtoul(text.c_str(), &end, 10);
++    if (errno != 0 || !end || *end != '\0' || value == 0
++            || value > std::numeric_limits<uint32_t>::max()) {
++        return false;
++    }
++    *task_id = static_cast<uint32_t>(value);
++    return true;
++}
++
++bool multi_window_mode::get_route(const layer_info &layer_info,
++        task_window_route *route) const {
++    if (layer_info.type != LayerSplitType::TID
++            && layer_info.type != LayerSplitType::TaskSnapshot) {
++        return false;
++    }
++    uint32_t task_id = 0;
++    if (!parse_task_id(layer_info.tid, &task_id))
++        return false;
++    const auto it = task_routes.find(task_id);
++    if (it == task_routes.end() || !it->second.enabled
++            || it->second.display_id != 0) {
++        return false;
++    }
++    if (route)
++        *route = it->second;
++    return true;
++}
++
++window *multi_window_mode::get_full_ui_window(
++        waydroid_hwc_composer_device_1 *pdev) {
++    if (!full_ui_requested)
++        return nullptr;
++    auto &windows = pdev->display->windows;
++    const auto it = windows.find("Waydroid");
++    if (it != windows.end())
++        return it->second.get();
++    return windows.add(pdev, "Waydroid", "Waydroid", "0");
++}
++
+ window *multi_window_mode::get_window(waydroid_hwc_composer_device_1 *pdev, layer_info &layer_info) {
+     auto &windows = pdev->display->windows;
+-    if (layer_info.type == LayerSplitType::TID) {
+-        // Create windows based on Task ID in layer name
+-        if (is_blacklisted(pdev, layer_info.aid, layer_info.component))
+-            return nullptr;
++    task_window_route route;
++    const bool routed = get_route(layer_info, &route);
++    if (layer_info.type == LayerSplitType::TaskSnapshot) {
++        if (!routed)
++            return get_full_ui_window(pdev);
++        // A routed snapshot is transient and must reuse the explicit task
++        // carrier; it must never create a host window by itself.
++        const auto it = windows.find(layer_info.tid);
++        return it == windows.end() ? nullptr : it->second.get();
++    } else if (layer_info.type == LayerSplitType::TID) {
++        if (!routed)
++            return get_full_ui_window(pdev);
+ 
+         auto it = windows.find(layer_info.tid);
+         if (it != windows.end()) {
++            it->second->set_task_metadata(route);
++            auto bounds = task_bounds.find(layer_info.tid);
++            if (bounds != task_bounds.end()) {
++                it->second->set_task_bounds(bounds->second);
++                it->second->enable_task_resize();
++            }
+             return it->second.get();
+         } else {
+-            return windows.add(pdev, layer_info.tid, layer_info.aid, layer_info.tid, color_transparent);
+-        }
+-    } else if (layer_info.type == LayerSplitType::RawName) {
+-        if (layer_info.aid == "InputMethod") {
+-            auto it = windows.find("InputMethod");
+-            if (it != windows.end()) {
+-                return it->second.get();
+-            } else {
+-                return windows.add(pdev, "InputMethod", "InputMethod", "none", color_transparent);
++            const hwc_rect_t *initial_bounds = nullptr;
++            auto bounds = task_bounds.find(layer_info.tid);
++            // Every task carrier starts with Android's task rectangle.
++            // Otherwise the global full-UI maximize bit can be applied
++            // before HWC has a chance to publish task geometry.
++            if (bounds != task_bounds.end())
++                initial_bounds = &bounds->second;
++            window *new_window = windows.add(pdev, layer_info.tid, route.app_id,
++                    layer_info.tid, color_transparent, initial_bounds);
++            new_window->set_task_metadata(route);
++            if (bounds != task_bounds.end()) {
++                new_window->set_task_bounds(bounds->second);
++                new_window->enable_task_resize();
+             }
++            return new_window;
+         }
+     }
+-    return nullptr;
++    // Unscoped, empty, MiFreeform and system layers never create an external
++    // toplevel. They remain content of the explicit full-UI carrier.
++    return get_full_ui_window(pdev);
+ }
+ 
+ bool multi_window_mode::can_handle_layer(const hwc_layer_1& layer) {
+@@ -70,22 +141,54 @@ int multi_window_mode::prepare(hwc_layer_1* hwc_layer, size_t) {
+ 
+ int multi_window_mode::setup_set(waydroid_hwc_composer_device_1* pdev, hwc_display_contents_1_t* contents) {
+     layer_infos.setup(pdev, contents->hwLayers, contents->numHwLayers);
++    task_routes = pdev->display->get_task_window_routes();
++    full_ui_requested = pdev->display->is_full_ui_requested();
++    live_content_tasks.clear();
++    for (size_t i = 0; i < contents->numHwLayers; ++i) {
++        const auto &info = layer_infos[i];
++        const auto &layer = contents->hwLayers[i];
++        if (can_handle_layer(layer) && layer.handle
++                && info.type == LayerSplitType::TID) {
++            live_content_tasks.insert(info.tid);
++        }
++    }
++    task_bounds.clear();
++    for (size_t i = 0; i < contents->numHwLayers; ++i) {
++        const auto &info = layer_infos[i];
++        const auto &layer = contents->hwLayers[i];
++        if (!can_handle_layer(layer) || !layer.handle
++                || (info.type != LayerSplitType::TID
++                    && info.type != LayerSplitType::TaskSnapshot)) {
++            continue;
++        }
++        if (!get_route(info, nullptr))
++            continue;
++        if (info.type == LayerSplitType::TaskSnapshot
++                && live_content_tasks.count(info.tid) != 0) {
++            continue;
++        }
++        auto [it, inserted] = task_bounds.emplace(info.tid, layer.displayFrame);
++        if (!inserted) {
++            it->second.left = std::min(it->second.left, layer.displayFrame.left);
++            it->second.top = std::min(it->second.top, layer.displayFrame.top);
++            it->second.right = std::max(it->second.right, layer.displayFrame.right);
++            it->second.bottom = std::max(it->second.bottom, layer.displayFrame.bottom);
++        }
++    }
+     return 0;
+ }
+ 
+ int multi_window_mode::cleanup_stale_windows(waydroid_hwc_composer_device_1* pdev,
+-                                             hwc_display_contents_1_t* contents) {
++                                             hwc_display_contents_1_t*) {
++    // Explicit framework routes, rather than transient layer geometry, own
++    // external toplevel lifetime. The full UI and routed tasks may coexist.
+     pdev->display->windows.erase_if([&](const auto& it){
+         const auto& key = it.first;
+-        for (size_t i = 0; i < contents->numHwLayers; ++i) {
+-            const auto &layer_info = layer_infos[i];
+-            const auto &layer = contents->hwLayers[i];
+-            if (can_handle_layer(layer)
+-                && layer_info.type != LayerSplitType::Empty && layer_info.key() == key) {
+-                return false;
+-            }
+-        }
+-        return true;
++        if (key == "Waydroid")
++            return !full_ui_requested;
++        uint32_t task_id = 0;
++        return !parse_task_id(key, &task_id)
++                || task_routes.find(task_id) == task_routes.end();
+     });
+ 
+     pdev->display->ignored_apps.clear();
+@@ -106,10 +209,27 @@ int multi_window_mode::handle_layer(waydroid_hwc_composer_device_1* pdev, hwc_la
+     }
+ 
+     assert(hwc_layer->handle);
+-    window *window = get_window(pdev, layer_infos[i]);
++    auto &info = layer_infos[i];
++    if (info.type == LayerSplitType::TaskSnapshot
++            && live_content_tasks.count(info.tid) != 0) {
++        // WM Shell keeps the app/caption buffers alive during edge-snap
++        // transitions.  Stacking its stale snapshot above them causes a
++        // one-frame jump or black flash on a fast directional fling.
++        if (hwc_layer->acquireFenceFd != -1)
++            close(hwc_layer->acquireFenceFd);
++        return 0;
++    }
++    window *window = get_window(pdev, info);
+ 
+     if (window) {
+-        return apply_hwc_layer_to_window(pdev, hwc_layer, i, window);
++        const bool primary_layer = window->taskID != "0"
++                && (info.type == LayerSplitType::TID
++                    || info.type == LayerSplitType::TaskSnapshot)
++                && info.component != "Caption"
++                && info.component != "DecorContainer"
++                && !window->primary_layer_submitted;
++        return apply_hwc_layer_to_window(pdev, hwc_layer, i, window,
++                primary_layer);
+     } else {
+         if (hwc_layer->acquireFenceFd != -1) {
+             close(hwc_layer->acquireFenceFd);
+@@ -119,8 +239,9 @@ int multi_window_mode::handle_layer(waydroid_hwc_composer_device_1* pdev, hwc_la
+ }
+ 
+ int multi_window_mode::post_processing(waydroid_hwc_composer_device_1 *pdev, hwc_display_contents_1_t *contents) {
+-    if (contents->flags & HWC_GEOMETRY_CHANGED) {
+-        neutralize_remaining_subsurfaces(pdev);
+-    }
++    // Layer order may change without HWC_GEOMETRY_CHANGED (for example
++    // during a caption/task transition), so retire unused child slots
++    // on every frame.
++    neutralize_remaining_subsurfaces(pdev);
+     return 0;
+-}
+\ No newline at end of file
++}
+diff --git a/hwcomposer/modes/multi-window.h b/hwcomposer/modes/multi-window.h
+index e5afee6..7dd38d3 100644
+--- a/hwcomposer/modes/multi-window.h
++++ b/hwcomposer/modes/multi-window.h
+@@ -29,8 +29,16 @@
+ 
+ class multi_window_mode : public waydroid_mode {
+     split_layer_names_helper layer_infos;
++    std::map<std::string, hwc_rect_t> task_bounds;
++    std::map<uint32_t, task_window_route> task_routes;
++    bool full_ui_requested = false;
++    // A16 can submit a live task and its transition snapshot in the
++    // same HWC frame.  The live task must remain visually authoritative.
++    std::set<std::string> live_content_tasks;
+ 
+-    static window *get_window(waydroid_hwc_composer_device_1 *pdev, layer_info &layer_info);
++    window *get_window(waydroid_hwc_composer_device_1 *pdev, layer_info &layer_info);
++    window *get_full_ui_window(waydroid_hwc_composer_device_1 *pdev);
++    bool get_route(const layer_info &layer_info, task_window_route *route) const;
+     static bool can_handle_layer(const hwc_layer_1& layer);
+ 
+   public:
+@@ -41,4 +49,4 @@ class multi_window_mode : public waydroid_mode {
+                               hwc_display_contents_1_t* contents) final;
+     int handle_layer(waydroid_hwc_composer_device_1 *pdev, hwc_layer_1 *hwc_layer, size_t hwc_layer_index) final;
+     int post_processing(waydroid_hwc_composer_device_1 *pdev, hwc_display_contents_1_t *contents) final;
+-};
+\ No newline at end of file
++};
+diff --git a/hwcomposer/modes/single-window.cpp b/hwcomposer/modes/single-window.cpp
+index 14ffccb..00ede92 100644
+--- a/hwcomposer/modes/single-window.cpp
++++ b/hwcomposer/modes/single-window.cpp
+@@ -55,10 +55,7 @@ int single_window_mode_base::cleanup_stale_windows(waydroid_hwc_composer_device_
+         return layer_info.type == LayerSplitType::TID;
+     });
+     if (first_tid_layer != layer_infos.container().cend()) {
+-        if (is_blacklisted(pdev, first_tid_layer->aid, first_tid_layer->component)) {
+-            clear_open_windows(pdev);
+-            return 0;
+-        } else if (pdev->display->ignored_apps.count(first_tid_layer->tid) == 0) {
++        if (pdev->display->ignored_apps.count(first_tid_layer->tid) == 0) {
+             target_layer_tid = first_tid_layer->tid;
+             target_layer_aid = first_tid_layer->aid;
+         }
+@@ -135,4 +132,4 @@ int compositing_single_window_mode::handle_layer(waydroid_hwc_composer_device_1*
+     }
+ 
+     return Base::handle_layer(pdev, hwc_layer, i);
+-}
+\ No newline at end of file
++}
+diff --git a/hwcomposer/modes/waydroid_mode.cpp b/hwcomposer/modes/waydroid_mode.cpp
+index a4a214a..8448895 100644
+--- a/hwcomposer/modes/waydroid_mode.cpp
++++ b/hwcomposer/modes/waydroid_mode.cpp
+@@ -95,21 +95,63 @@ layer_info split_layer_names_helper::split_layer_name(const std::string &layer_n
+                 std::string()
+         };
+     } else if (layer_name.compare(0, 4, "TID:") == 0) {
+-        const auto hash_pos = layer_name.find('#');
+-        const auto slash_pos = layer_name.find('/');
+-        const auto hash_after_slash_pos = layer_name.find('#', slash_pos);
+-
++        const auto hash_pos = layer_name.find('#', 4);
++        if (hash_pos == std::string::npos || hash_pos == 4) {
++            return {LayerSplitType::Empty, std::string(), std::string()};
++        }
++        const std::string tid = layer_name.substr(4, hash_pos - 4);
++        if (tid.find_first_not_of("0123456789") != std::string::npos) {
++            return {LayerSplitType::Empty, std::string(), std::string()};
++        }
++        const std::string payload = layer_name.substr(hash_pos + 1);
++        if (payload.empty()) {
++            return {LayerSplitType::Empty, std::string(), std::string()};
++        }
++        const auto slash_pos = payload.find('/');
++        if (slash_pos == std::string::npos) {
++            // A16 PopupWindow layers have TID:<task>#PopupWindow:<hash>.
++            // They still belong to the task even without app/component.
++            return {LayerSplitType::TID, payload, tid, payload};
++        }
++        if (slash_pos == 0 || slash_pos + 1 == payload.size()) {
++            return {LayerSplitType::Empty, std::string(), std::string()};
++        }
++        const auto component_end = payload.find('#', slash_pos + 1);
++        const std::string component = payload.substr(
++                slash_pos + 1, component_end - slash_pos - 1);
++        if (component.empty()) {
++            return {LayerSplitType::Empty, std::string(), std::string()};
++        }
+         return {
+                 LayerSplitType::TID,
+-                layer_name.substr(hash_pos + 1, slash_pos - hash_pos - 1),
+-                layer_name.substr(4, hash_pos - 4),
+-                layer_name.substr(slash_pos + 1, hash_after_slash_pos - slash_pos - 1)
++                payload.substr(0, slash_pos),
++                tid,
++                component
+         };
+     } else {
++        constexpr const char *snapshot_prefix =
++                "transition snapshot: Task{";
++        if (layer_name.rfind(snapshot_prefix, 0) == 0) {
++            const auto hash_pos = layer_name.find('#',
++                    std::char_traits<char>::length(snapshot_prefix));
++            const auto end_pos = hash_pos == std::string::npos
++                    ? std::string::npos : layer_name.find(' ', hash_pos + 1);
++            const std::string tid = hash_pos == std::string::npos
++                    ? std::string() : layer_name.substr(hash_pos + 1,
++                            end_pos - hash_pos - 1);
++            if (tid.empty()
++                    || tid.find_first_not_of("0123456789")
++                            != std::string::npos) {
++                return {LayerSplitType::Empty, std::string(),
++                        std::string()};
++            }
++            return {LayerSplitType::TaskSnapshot, "Snapshot", tid,
++                    "Snapshot"};
++        }
+         const auto hash_pos = layer_name.find('#');
+ 
+         return {
+-                LayerSplitType::RawName,
++                LayerSplitType::Unscoped,
+                 layer_name.substr(0, hash_pos),
+                 "none"s
+         };
+@@ -133,9 +175,10 @@ void split_layer_names_helper::setup(waydroid_hwc_composer_device_1 *pdev, const
+ }
+ 
+ const std::string& layer_info::key() const {
+-    if (type == LayerSplitType::TID) {
++    if (type == LayerSplitType::TID
++            || type == LayerSplitType::TaskSnapshot) {
+         return tid;
+-    } else if (type == LayerSplitType::RawName) {
++    } else if (type == LayerSplitType::Unscoped) {
+         return aid;
+     } else {
+         abort();
+@@ -147,4 +190,4 @@ layer_info &split_layer_names_helper::operator[](size_t i) {
+ }
+ const std::vector<layer_info> &split_layer_names_helper::container() const {
+     return layer_infos;
+-}
+\ No newline at end of file
++}
+diff --git a/hwcomposer/modes/waydroid_mode.h b/hwcomposer/modes/waydroid_mode.h
+index a93cb50..9aadc0b 100644
+--- a/hwcomposer/modes/waydroid_mode.h
++++ b/hwcomposer/modes/waydroid_mode.h
+@@ -82,7 +82,8 @@ class skipped_layers_helper {
+ 
+ enum class LayerSplitType {
+     TID,
+-    RawName,
++    TaskSnapshot,
++    Unscoped,
+     Empty
+ };
+ struct layer_info {
+@@ -103,4 +104,4 @@ class split_layer_names_helper {
+ 
+     layer_info &operator[](size_t i);
+     const std::vector<layer_info> &container() const;
+-};
+\ No newline at end of file
++};
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+index c4263bc..b365205 100644
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -90,6 +90,10 @@ buffer::~buffer() {
+         wl_buffer_destroy(wl_buffer);
+     if (isShm && shm_data && shm_data != MAP_FAILED)
+         munmap(shm_data, size);
++    if (handle) {
++        native_handle_close(handle);
++        native_handle_delete(const_cast<native_handle_t*>(handle));
++    }
+ }
+ 
+ // Call me from egl_worker_thread only!
+@@ -127,10 +131,18 @@ xdg_surface_handle_configure(void *data, struct xdg_surface *surface,
+                  uint32_t serial)
+ {
+     auto window = static_cast<struct window *>(data);
++    std::unique_lock callback_lock(window->toplevel_callback_mutex);
++    struct display *display = window->display;
+ 
+     xdg_surface_ack_configure(surface, serial);
+-
+     window->configured = true;
++    const bool wake_task_hwc_after_ack = window->taskID != "0"
++            && window->taskID != "none";
++    callback_lock.unlock();
++    if (wake_task_hwc_after_ack && display->procs
++            && display->procs->invalidate) {
++        display->procs->invalidate(display->procs);
++    }
+ }
+ 
+ static const struct xdg_surface_listener xdg_surface_listener = {
+@@ -203,16 +215,58 @@ do_hotplug(struct display *display) {
+ static void
+ xdg_toplevel_handle_configure(void *data, struct xdg_toplevel *,
+                               int32_t width, int32_t height,
+-                              struct wl_array *)
++                              struct wl_array *states)
+ {
+     struct window *window = (struct window *)data;
++    std::unique_lock callback_lock(window->toplevel_callback_mutex);
+     struct display *display = window->display;
+ 
++    // Every desktop task owns one xdg_toplevel.  Its configure is
++    // acknowledged by Android through the task bounds bridge below;
++    // compat only selects the bridge recipe, not a second geometry owner.
++    if (window->taskID != "0" && window->taskID != "none") {
++        auto configured_state = waydroid_task_window_state::Normal;
++        bool activated = false;
++        bool drag_resizing = false;
++        const auto *state_data = static_cast<const uint32_t *>(states->data);
++        for (size_t i = 0; i < states->size / sizeof(*state_data); ++i) {
++            const uint32_t state = state_data[i];
++            if (state == XDG_TOPLEVEL_STATE_ACTIVATED)
++                activated = true;
++            if (state == XDG_TOPLEVEL_STATE_RESIZING)
++                drag_resizing = true;
++            if (state == XDG_TOPLEVEL_STATE_MAXIMIZED
++                    || state == XDG_TOPLEVEL_STATE_FULLSCREEN) {
++                configured_state = waydroid_task_window_state::Maximized;
++            }
++        }
++        const bool task_state_transition = window->observe_task_window_state(
++                configured_state, activated);
++        if (task_state_transition) {
++            uint32_t task_id = 0;
++            if (window->get_numeric_task_id(&task_id)) {
++                display->enqueue_task_window_state_request(task_id,
++                        configured_state,
++                        {window->task_left, window->task_top,
++                         window->task_right, window->task_bottom});
++            }
++        }
++        // State reconciliation may suppress an echoed size, but it must
++        // never suppress the compositor's authoritative resize END.
++        if (!window->host_task_window_state_request_pending
++                || !drag_resizing) {
++            window->queue_task_configure(width, height, drag_resizing,
++                    task_state_transition);
++        }
++        // xdg_surface.configure owns the post-ack HWC wakeup.
++        return;
++    }
++
+     if (width <= 1 || height <= 1) {
+ 		/* Compositor is deferring to us */
+         /* or invalid during calibration */
+ 		return;
+-	}
++    }
+ 
+     display->req_width = width;
+     display->req_height = height;
+@@ -221,6 +275,10 @@ xdg_toplevel_handle_configure(void *data, struct xdg_toplevel *,
+         choose_width_height(display, width, height);
+         if (display->wm_base)
+             xdg_surface_set_window_geometry(window->xdg_surface, 0, 0, display->width, display->height);
++        // HWC2On1Adapter may already hold its adapter mutex while a
++        // roundtrip dispatches the paired xdg_surface.configure.
++        // Release the window lifetime lock before entering the adapter.
++        callback_lock.unlock();
+         do_hotplug(display);
+     }
+ }
+@@ -232,32 +290,40 @@ static void
+ xdg_toplevel_handle_close(void *data, struct xdg_toplevel *)
+ {
+     struct window *window = (struct window *)data;
++    std::unique_lock callback_lock(window->toplevel_callback_mutex);
+     struct display *display = window->display;
+ 
+-    // simulate user input to restart idle timeout (TODO: find a better way)
+-    send_key_event(window->display, 0, WL_KEYBOARD_KEY_STATE_PRESSED);
+-    send_key_event(window->display, 0, WL_KEYBOARD_KEY_STATE_RELEASED);
++    // Simulate user input to restart idle timeout (TODO: find a better way).
++    send_key_event(display, 0, WL_KEYBOARD_KEY_STATE_PRESSED);
++    send_key_event(display, 0, WL_KEYBOARD_KEY_STATE_RELEASED);
+ 
+-    if (display->task != nullptr) {
+-        if (window->taskID != "none") {
+-            if (window->taskID == "0") {
++    if (window->taskID != "none") {
++        if (window->taskID == "0") {
++            char active_apps[PROPERTY_VALUE_MAX];
++            property_get("waydroid.active_apps", active_apps, "none");
++            if (!strcmp(active_apps, "Waydroid"))
+                 property_set("waydroid.active_apps", "none");
+-                display->task->removeAllVisibleRecentTasks();
+-            } else {
+-                display->task->removeTask(stoi(window->taskID));
+-            }
++            // Closing the full-UI carrier must not remove or reclassify
++            // explicitly routed external tasks.
++            display->set_full_ui_requested(false);
++        } else {
++            uint32_t task_id = 0;
++            if (window->get_numeric_task_id(&task_id))
++                display->enqueue_task_remove(task_id);
++            else
++                ALOGE("ignoring close for malformed task id %s",
++                        window->taskID.c_str());
+         }
+     }
+ 
+-    std::scoped_lock lock(window->display->windowsMutex);
+-    std::string key;
+-    if (window->taskID != "0" && window->taskID != "none") {
+-        key = window->taskID;
+-    } else {
+-        key = window->appID;
+-    }
+-    display->ignored_apps.insert(key);
+-    display->windows.erase(key);
++    // Android/SF layer disappearance is the window-lifetime authority.
++    // The next HWC stale-window pass destroys this toplevel under
++    // the global window lock, without acquiring it from this callback.
++    // Adapter callbacks use a different lock domain.  Never enter it
++    // while the window lifetime mutex is held.
++    callback_lock.unlock();
++    if (display->procs && display->procs->invalidate)
++        display->procs->invalidate(display->procs);
+ }
+ 
+ static const struct xdg_toplevel_listener xdg_toplevel_listener = {
+@@ -377,9 +443,275 @@ void surface_context::set_display_frame(hwc_rect_t rect, double scale) {
+ void window::reset_per_set_state() {
+     lastLayer = 0;
+     last_layer_buffer = nullptr;
++    primary_layer_submitted = false;
++    if (input_region) {
++        wl_region_subtract(input_region, 0, 0, INT_MAX, INT_MAX);
++        if (task_bounds_valid || host_carrier_configured()) {
++            const int width = host_carrier_configured()
++                    ? host_carrier_width
++                    : std::max(1, static_cast<int>(ceil(
++                            (task_right - task_left) / display->scale)));
++            const int height = host_carrier_configured()
++                    ? host_carrier_height
++                    : std::max(1, static_cast<int>(ceil(
++                            (task_bottom - task_top) / display->scale)));
++            wl_region_add(input_region, 0, 0, width, height);
++        }
++    }
++}
++
++static bool send_pointer_button_to_android(struct display *display,
++        uint32_t button, uint32_t state);
++
++void window::set_task_bounds(const hwc_rect_t &bounds) {
++    if (taskID == "0" || taskID == "none"
++            || bounds.right <= bounds.left || bounds.bottom <= bounds.top) {
++        return;
++    }
++    const bool changed = !task_bounds_valid
++            || task_left != bounds.left || task_top != bounds.top
++            || task_right != bounds.right || task_bottom != bounds.bottom;
++    // Task bounds are geometry only; AOSP ctrlType owns drag classification.
++    task_left = bounds.left;
++    task_top = bounds.top;
++    task_right = bounds.right;
++    task_bottom = bounds.bottom;
++    task_bounds_valid = true;
++    if (!changed) {
++        return;
++    }
++
++    const int width = std::max(1, static_cast<int>(ceil(
++            (task_right - task_left) / display->scale)));
++    const int height = std::max(1, static_cast<int>(ceil(
++            (task_bottom - task_top) / display->scale)));
++    // Keep the task-sized carrier addressable even where Android's
++    // inset app child has no pixels.
++    const int carrier_width = host_carrier_configured()
++            ? host_carrier_width : width;
++    const int carrier_height = host_carrier_configured()
++            ? host_carrier_height : height;
+     if (input_region) {
+         wl_region_subtract(input_region, 0, 0, INT_MAX, INT_MAX);
++        wl_region_add(input_region, 0, 0, carrier_width, carrier_height);
++        wl_surface_set_input_region(surface, input_region);
++    }
++    if (!host_carrier_configured()) {
++        if (xdg_surface) {
++            xdg_surface_set_window_geometry(xdg_surface, 0, 0, width, height);
++        }
++        if (dedicated_background_surface && viewport) {
++            wp_viewport_set_destination(viewport, width, height);
++        }
++    }
++    {
++        std::scoped_lock input_lock(display->input_state_mutex);
++        display->layers[surface] = {
++                .x = task_left, .y = task_top,
++                .owner_task_id = taskID };
++    }
++    last_task_resize_width = task_right - task_left;
++    last_task_resize_height = task_bottom - task_top;
++}
++
++void window::set_layer_origin(int left, int top) {
++    if (task_bounds_valid)
++        return;
++    layer_origin_x = left;
++    layer_origin_y = top;
++    layer_origin_valid = true;
++}
++
++void window::enable_task_resize() {
++    task_resize_enabled = task_bounds_valid && taskID != "0" && taskID != "none";
++}
++
++static bool parse_numeric_task_id(const std::string &task_id_text,
++        uint32_t *task_id) {
++    if (!task_id || task_id_text.empty()
++            || task_id_text.find_first_not_of("0123456789")
++                    != std::string::npos) {
++        return false;
++    }
++    char *task_end = nullptr;
++    errno = 0;
++    const unsigned long parsed = std::strtoul(
++            task_id_text.c_str(), &task_end, 10);
++    if (errno != 0 || task_end == task_id_text.c_str() || *task_end != '\0'
++            || parsed == 0 || parsed > INT32_MAX) {
++        return false;
++    }
++    *task_id = static_cast<uint32_t>(parsed);
++    return true;
++}
++
++bool window::get_numeric_task_id(uint32_t *task_id) const {
++    return parse_numeric_task_id(taskID, task_id);
++}
++
++void window::queue_task_configure(int32_t width, int32_t height,
++        bool drag_resizing, bool state_transition) {
++    if (width > 1 && height > 1) {
++        last_queued_task_configure_width = width;
++        last_queued_task_configure_height = height;
++    } else {
++        // xdg-shell permits 0x0 when the compositor leaves size choice
++        // to the client.  Mutter uses that form for the final configure
++        // after dropping XDG_TOPLEVEL_STATE_RESIZING.
++        width = last_queued_task_configure_width;
++        height = last_queued_task_configure_height;
++        if (width <= 1 || height <= 1)
++            return;
++    }
++    const uint32_t packed_height = static_cast<uint32_t>(height)
++            | (drag_resizing ? UINT32_C(0x80000000) : 0)
++            | (state_transition ? UINT32_C(0x40000000) : 0);
++    const uint64_t size =
++            (static_cast<uint64_t>(static_cast<uint32_t>(width)) << 32) |
++            packed_height;
++    pending_task_configure_size.store(size, std::memory_order_release);
++}
++
++bool window::take_task_configure(int32_t *width, int32_t *height) {
++    const uint64_t size = pending_task_configure_size.exchange(
++            0, std::memory_order_acquire);
++    if (size == 0)
++        return false;
++    const uint32_t packed_height = static_cast<uint32_t>(size);
++    *width = static_cast<int32_t>(size >> 32);
++    *height = static_cast<int32_t>(packed_height & UINT32_C(0x3fffffff));
++    taken_task_drag_resizing =
++            (packed_height & UINT32_C(0x80000000)) != 0;
++    taken_task_state_transition =
++            (packed_height & UINT32_C(0x40000000)) != 0;
++    return *width > 1 && *height > 1;
++}
++
++bool window::host_carrier_configured() const {
++    return host_carrier_width > 1 && host_carrier_height > 1;
++}
++
++void window::apply_task_carrier_configure(int32_t width, int32_t height) {
++    if (width <= 1 || height <= 1)
++        return;
++    host_carrier_width = width;
++    host_carrier_height = height;
++    if (input_region) {
++        wl_region_subtract(input_region, 0, 0, INT_MAX, INT_MAX);
++        wl_region_add(input_region, 0, 0, width, height);
++        wl_surface_set_input_region(surface, input_region);
++    }
++    if (xdg_surface)
++        xdg_surface_set_window_geometry(xdg_surface, 0, 0, width, height);
++    if (dedicated_background_surface && viewport)
++        wp_viewport_set_destination(viewport, width, height);
++    wl_surface_damage(surface, 0, 0, INT32_MAX, INT32_MAX);
++    ALOGI("TASK_XDG_CONFIGURE task=%s carrier=%dx%d"
++            " android=%d,%d-%d,%d drag_resizing=%d",
++            taskID.c_str(), width, height, task_left, task_top,
++            task_right, task_bottom, taken_task_drag_resizing);
++}
++
++void window::handle_task_configure(int32_t width, int32_t height) {
++    if (!task_resize_enabled || width <= 1 || height <= 1)
++        return;
++    const bool drag_resizing = taken_task_drag_resizing;
++    const bool host_geometry_authoritative = drag_resizing
++            || host_drag_resizing || taken_task_state_transition;
++    if (!host_geometry_authoritative) {
++        ALOGI("TASK_XDG_CONFIGURE task=%s carrier=unchanged"
++                " suggestion=%dx%d reason=ordinary-configure",
++                taskID.c_str(), width, height);
++        return;
++    }
++    apply_task_carrier_configure(width, height);
++    const int physical_width = std::max(1, static_cast<int>(ceil(width * display->scale)));
++    const int physical_height = std::max(1, static_cast<int>(ceil(height * display->scale)));
++    const bool host_size_changed = physical_width != last_host_configure_width
++            || physical_height != last_host_configure_height;
++    const bool drag_state_changed = drag_resizing != host_drag_resizing;
++    if (!host_size_changed && !drag_state_changed)
++        return;
++    if (physical_width == last_task_resize_width
++            && physical_height == last_task_resize_height
++            && !drag_state_changed) {
++        last_host_configure_width = physical_width;
++        last_host_configure_height = physical_height;
++        return;
++    }
++    uint32_t parsed_task = 0;
++    if (!get_numeric_task_id(&parsed_task)) {
++        ALOGE("ignoring configure for malformed task id %s", taskID.c_str());
++        return;
++    }
++    const task_window_bounds bounds = {task_left, task_top,
++            task_left + physical_width, task_top + physical_height};
++    const uint64_t generation = display->enqueue_task_window_bounds_request(
++            parsed_task, bounds, drag_resizing);
++    if (generation == 0)
++        return;
++    last_host_configure_width = physical_width;
++    last_host_configure_height = physical_height;
++    host_drag_resizing = drag_resizing;
++    ALOGI("task %s queues host bounds generation=%" PRIu64
++            " drag_resizing=%d %dx%d -> Android bounds %d,%d-%d,%d",
++            taskID.c_str(), generation, drag_resizing, width, height,
++            bounds.left, bounds.top, bounds.right, bounds.bottom);
++}
++
++void window::apply_task_window_state(const task_window_state_update &update) {
++    requested_task_window_state = update.state;
++    requested_task_window_generation = update.generation;
++    if (update.source == waydroid_task_window_state_source::Host)
++        host_task_window_state_request_pending = false;
++    switch (update.state) {
++        case waydroid_task_window_state::Normal:
++            set_maximize(false);
++            task_window_state_ack_pending = xdg_toplevel != nullptr;
++            break;
++        case waydroid_task_window_state::Maximized:
++            set_maximize(true);
++            task_window_state_ack_pending = xdg_toplevel != nullptr;
++            break;
++        case waydroid_task_window_state::Minimized:
++            minimize();
++            observed_task_window_state = waydroid_task_window_state::Minimized;
++            task_window_state_ack_pending = false;
++            break;
++        case waydroid_task_window_state::FullUi:
++            if (taskID == "0")
++                set_maximize(true);
++            task_window_state_ack_pending = false;
++            break;
+     }
++    ALOGI("task %s applies window state=%u source=%u generation=%" PRIu64,
++            taskID.c_str(), static_cast<uint32_t>(update.state),
++            static_cast<uint32_t>(update.source), update.generation);
++}
++
++bool window::observe_task_window_state(waydroid_task_window_state state,
++        bool activated) {
++    if (task_window_state_ack_pending && state == requested_task_window_state) {
++        observed_task_window_state = state;
++        task_window_state_ack_pending = false;
++        ALOGI("task %s acks window state=%u generation=%" PRIu64,
++                taskID.c_str(), static_cast<uint32_t>(state),
++                requested_task_window_generation);
++        return false;
++    }
++    if (state == observed_task_window_state)
++        return false;
++    // xdg-shell has no minimized state.  Some compositors send an
++    // unactivated normal configure while honoring set_minimized(); only an
++    // activated configure is evidence that the host restored the window.
++    if (observed_task_window_state == waydroid_task_window_state::Minimized
++            && state == waydroid_task_window_state::Normal && !activated) {
++        return false;
++    }
++    observed_task_window_state = state;
++    task_window_state_ack_pending = false;
++    host_task_window_state_request_pending = true;
++    return true;
+ }
+ 
+ void window::set_maximize(bool enabled) {
+@@ -400,15 +732,21 @@ void window::set_maximize(bool enabled) {
+ }
+ 
+ void window::set_title(const char* title) {
++    const std::string new_title = title ? title : "";
++    if (this->title == new_title)
++        return;
++    this->title = new_title;
+     if (xdg_toplevel) {
+-        xdg_toplevel_set_title(xdg_toplevel, title);
++        xdg_toplevel_set_title(xdg_toplevel, this->title.c_str());
+     } else {
+         assert(shell_surface);
+-        wl_shell_surface_set_title(shell_surface, title);
++        wl_shell_surface_set_title(shell_surface, this->title.c_str());
+     }
+ }
+ 
+ void window::set_app_id(std::string appID) {
++    if (this->appID == appID)
++        return;
+     this->appID = std::move(appID);
+     if (xdg_toplevel) {
+         const std::string &wayland_app_id = [&](){
+@@ -422,6 +760,12 @@ void window::set_app_id(std::string appID) {
+     }
+ }
+ 
++void window::set_task_metadata(const task_window_route &route) {
++    component = route.component;
++    set_title(route.title.empty() ? route.app_id.c_str() : route.title.c_str());
++    set_app_id(route.app_id);
++}
++
+ void window::minimize() {
+     if (xdg_toplevel) {
+         xdg_toplevel_set_minimized(xdg_toplevel);
+@@ -431,6 +775,7 @@ void window::minimize() {
+ }
+ 
+ window::~window() {
++    std::scoped_lock callback_lock(toplevel_callback_mutex);
+     if (xdg_toplevel)
+         xdg_toplevel_destroy(xdg_toplevel);
+     if (xdg_surface)
+@@ -444,6 +789,18 @@ window::~window() {
+     if (idle_inhibitor)
+         zwp_idle_inhibitor_v1_destroy(idle_inhibitor);
+ 
++    {
++        std::scoped_lock input_lock(display->input_state_mutex);
++        display->layers.erase(surface);
++        for (const auto &layer : layers)
++            display->layers.erase(layer.surface);
++        if (display->pointer_gesture_task_id == taskID)
++            display->pointer_gesture_task_id.clear();
++        if (display->touch_gesture_task_id == taskID)
++            display->touch_gesture_task_id.clear();
++        if (display->active_gesture_task_id == taskID)
++            display->active_gesture_task_id.clear();
++    }
+     layers.clear();
+     if (dedicated_background_surface) {
+         if (viewport)
+@@ -475,7 +832,7 @@ static const struct wp_fractional_scale_v1_listener fractional_scale_listener =
+ };
+ 
+ std::unique_ptr<window>
+-window::create(struct display *display, bool use_subsurfaces, std::string appID, std::string taskID, hwc_color_t color)
++window::create(struct display *display, bool use_subsurfaces, std::string appID, std::string taskID, hwc_color_t color, const hwc_rect_t *initial_task_bounds)
+ {
+     std::unique_ptr<window> window { new struct window() };
+     if (!window)
+@@ -487,6 +844,25 @@ window::create(struct display *display, bool use_subsurfaces, std::string appID,
+     if (display->viewporter)
+         window->viewport = wp_viewporter_get_viewport(display->viewporter, window->surface);
+     window->taskID = std::move(taskID);
++    if (initial_task_bounds
++            && initial_task_bounds->right > initial_task_bounds->left
++            && initial_task_bounds->bottom > initial_task_bounds->top
++            && window->taskID != "0" && window->taskID != "none") {
++        window->task_left = initial_task_bounds->left;
++        window->task_top = initial_task_bounds->top;
++        window->task_right = initial_task_bounds->right;
++        window->task_bottom = initial_task_bounds->bottom;
++        window->task_bounds_valid = true;
++    }
++    {
++        // Keyboard focus may arrive during the configure roundtrip,
++        // before the first HWC layer has populated this map.
++        std::scoped_lock input_lock(display->input_state_mutex);
++        display->layers[window->surface] = {
++                .x = window->task_bounds_valid ? window->task_left : 0,
++                .y = window->task_bounds_valid ? window->task_top : 0,
++                .owner_task_id = window->taskID };
++    }
+     window->dedicated_background_surface = true;
+     window->bg_buffer = nullptr;
+ 
+@@ -524,7 +900,23 @@ window::create(struct display *display, bool use_subsurfaces, std::string appID,
+         abort();
+     }
+ 
+-    if (display->isMaximized || calibrating) {
++    if (window->task_bounds_valid && display->wm_base) {
++        const int task_width = std::max(1, static_cast<int>(ceil(
++                (window->task_right - window->task_left) / display->scale)));
++        const int task_height = std::max(1, static_cast<int>(ceil(
++                (window->task_bottom - window->task_top) / display->scale)));
++        xdg_surface_set_window_geometry(window->xdg_surface, 0, 0,
++                task_width, task_height);
++        if (window->viewport)
++            wp_viewport_set_destination(window->viewport, task_width, task_height);
++    }
++
++    // The global display maximized state belongs to the full-UI root.
++    // A task toplevel already has authoritative freeform bounds and must
++    // start unmaximized so the compositor can move and resize it.
++    // The display maximize bit belongs to the full-UI root only.
++    if (window->taskID == "0"
++            && (display->isMaximized || calibrating)) {
+         window->set_maximize(true);
+     }
+     // Set title
+@@ -582,11 +974,29 @@ window::create(struct display *display, bool use_subsurfaces, std::string appID,
+             window->set_maximize(false);
+     }
+ 
+-    if (display->wm_base)
+-        xdg_surface_set_window_geometry(window->xdg_surface, 0, 0, display->width, display->height);
++    if (display->wm_base) {
++        if (window->task_bounds_valid) {
++            const int task_width = std::max(1, static_cast<int>(ceil(
++                    (window->task_right - window->task_left) / display->scale)));
++            const int task_height = std::max(1, static_cast<int>(ceil(
++                    (window->task_bottom - window->task_top) / display->scale)));
++            xdg_surface_set_window_geometry(window->xdg_surface, 0, 0,
++                    task_width, task_height);
++        } else {
++            xdg_surface_set_window_geometry(window->xdg_surface, 0, 0,
++                    display->width, display->height);
++        }
++    }
+ 
+     struct wl_region *region = wl_compositor_create_region(display->compositor);
+     if (color.a == 0) {
++        if (window->task_bounds_valid) {
++            const int carrier_width = std::max(1, static_cast<int>(ceil(
++                    (window->task_right - window->task_left) / display->scale)));
++            const int carrier_height = std::max(1, static_cast<int>(ceil(
++                    (window->task_bottom - window->task_top) / display->scale)));
++            wl_region_add(region, 0, 0, carrier_width, carrier_height);
++        }
+         wl_surface_set_input_region(window->surface, region);
+         if (display->system_version >= 33)
+             window->input_region = region;
+@@ -599,6 +1009,9 @@ window::create(struct display *display, bool use_subsurfaces, std::string appID,
+         wl_region_destroy(region);
+     }
+ 
++    // Desktop tasks keep the xdg parent as a geometry-only carrier.
++    // Its transparent buffer owns host size and input; Android buffers
++    // remain child surfaces and cannot leak surfaceInsets into xdg geometry.
+     // TODO: Fix background when viewport is not supported
+     // No subsurface background for us!
+     if (!display->subcompositor ||
+@@ -625,34 +1038,50 @@ window::create(struct display *display, bool use_subsurfaces, std::string appID,
+     wl_surface_attach(window->surface, window->bg_buffer, 0, 0);
+     wl_surface_damage(window->surface, 0, 0, INT32_MAX, INT32_MAX);
+     wp_viewport_set_source(window->viewport, wl_fixed_from_int(0), wl_fixed_from_int(0), wl_fixed_from_int(1), wl_fixed_from_int(1));
+-    wp_viewport_set_destination(window->viewport, display->width, display->height);
++    if (window->task_bounds_valid) {
++        wp_viewport_set_destination(window->viewport,
++                std::max(1, static_cast<int>(ceil((window->task_right - window->task_left) / display->scale))),
++                std::max(1, static_cast<int>(ceil((window->task_bottom - window->task_top) / display->scale))));
++    } else {
++        wp_viewport_set_destination(window->viewport, display->width, display->height);
++    }
+     wl_surface_commit(window->surface);
+ 
+     return window;
+ }
+ 
+-surface_context::surface_context(wl_surface *surface, wp_viewport *viewport) : surface(surface), viewport(viewport) {}
++surface_context::surface_context(wl_surface *surface, wp_viewport *viewport, bool owns_resources)
++        : surface(surface), viewport(viewport), owns_resources(owns_resources) {}
+ surface_context::~surface_context() {
++    if (!owns_resources)
++        return;
+     if (viewport)
+         wp_viewport_destroy(viewport);
+     if (surface)
+         wl_surface_destroy(surface);
+ }
+-surface_context::surface_context(surface_context&& other) : surface(other.surface), viewport(other.viewport) {
++surface_context::surface_context(surface_context&& other)
++        : surface(other.surface), viewport(other.viewport),
++          owns_resources(other.owns_resources) {
+     other.surface = nullptr;
+     other.viewport = nullptr;
++    other.owns_resources = false;
+ }
+ surface_context& surface_context::operator=(surface_context&& rhs) {
+-    if (viewport)
+-        wp_viewport_destroy(viewport);
+-    if (surface)
+-        wl_surface_destroy(surface);
++    if (owns_resources) {
++        if (viewport)
++            wp_viewport_destroy(viewport);
++        if (surface)
++            wl_surface_destroy(surface);
++    }
+ 
+     surface = rhs.surface;
+     viewport = rhs.viewport;
++    owns_resources = rhs.owns_resources;
+ 
+     rhs.surface = nullptr;
+     rhs.viewport = nullptr;
++    rhs.owns_resources = false;
+ 
+     return *this;
+ }
+@@ -802,15 +1231,22 @@ keyboard_handle_enter(void *data, struct wl_keyboard *,
+     struct display *display = (struct display *)data;
+     display->keyboard_enter_serial = serial;
+ 
+-    std::scoped_lock lock(display->windowsMutex);
+-    auto window = reinterpret_cast<struct window *>(wl_surface_get_user_data(surface));
+-    if (!window)
+-        return; // Window was destroyed in hwc_set
++    std::string task_id_text;
++    {
++        std::scoped_lock input_lock(display->input_state_mutex);
++        auto it = display->layers.find(surface);
++        if (it == display->layers.end())
++            return;
++        task_id_text = it->second.owner_task_id;
++    }
+ 
+-    if (display->task != nullptr) {
+-        if (window->taskID != "none" && window->taskID != "0") {
+-            window->display->task->setFocusedTask(stoi(window->taskID));
+-        }
++    if (task_id_text != "none" && task_id_text != "0") {
++        uint32_t task_id = 0;
++        if (parse_numeric_task_id(task_id_text, &task_id))
++            display->enqueue_task_focus(task_id);
++        else
++            ALOGE("ignoring focus for malformed task id %s",
++                    task_id_text.c_str());
+     }
+ }
+ 
+@@ -912,8 +1348,15 @@ pointer_handle_motion(void *data, struct wl_pointer *,
+         x = int(x * display->scale);
+         y = int(y * display->scale);
+     }
+-    x += display->layers[display->pointer_surface].x;
+-    y += display->layers[display->pointer_surface].y;
++    layerFrame input_frame;
++    {
++        std::scoped_lock input_lock(display->input_state_mutex);
++        auto it = display->layers.find(display->pointer_surface);
++        if (it != display->layers.end())
++            input_frame = it->second;
++    }
++    x += input_frame.x;
++    y += input_frame.y;
+ 
+     ADD_EVENT(EV_ABS, ABS_X, x);
+     ADD_EVENT(EV_ABS, ABS_Y, y);
+@@ -966,32 +1409,68 @@ handle_relative_motion(void *data, struct zwp_relative_pointer_v1*,
+         ALOGE("Failed to write event for InputFlinger: %s", strerror(errno));
+ }
+ 
+-static void
+-pointer_handle_button(void *data, struct wl_pointer *,
+-                      uint32_t, uint32_t, uint32_t button,
+-                      uint32_t state)
+-{
+-    struct display* display = (struct display*)data;
++static bool send_pointer_button_to_android(struct display *display,
++        uint32_t button, uint32_t state) {
+     struct input_event event[2];
+     struct timespec rt;
+-    unsigned int res, n = 0;
+-
++    unsigned int n = 0;
+     if (ensure_pipe(display, INPUT_POINTER))
+-        return;
+-
+-    if (!display->pointer_surface)
+-        return;
+-
++        return false;
+     if (clock_gettime(CLOCK_MONOTONIC, &rt) == -1) {
+-        ALOGE("%s:%d error in touch clock_gettime: %s",
+-              __FILE__, __LINE__, strerror(errno));
++        ALOGE("%s:%d error in pointer clock_gettime: %s",
++                __FILE__, __LINE__, strerror(errno));
+     }
+     ADD_EVENT(EV_KEY, button, state);
+     ADD_EVENT(EV_SYN, SYN_REPORT, 0);
++    const ssize_t written = write(display->input_fd[INPUT_POINTER],
++            &event, sizeof(event));
++    if (written < static_cast<ssize_t>(sizeof(event))) {
++        ALOGE("Failed to write pointer button for InputFlinger: %s",
++                strerror(errno));
++        return false;
++    }
++    return true;
++}
+ 
+-    res = write(display->input_fd[INPUT_POINTER], &event, sizeof(event));
+-    if (res < sizeof(event))
+-        ALOGE("Failed to write event for InputFlinger: %s", strerror(errno));
++static void
++pointer_handle_button(void *data, struct wl_pointer *,
++                      uint32_t serial, uint32_t, uint32_t button,
++                      uint32_t state)
++{
++    struct display* display = (struct display*)data;
++    bool forward_to_android = true;
++    if (button == BTN_LEFT) {
++        std::scoped_lock input_lock(display->input_state_mutex);
++        if (state == WL_POINTER_BUTTON_STATE_PRESSED) {
++            if (!display->pointer_surface)
++                return;
++            // Repair an Android-owned sequence even if its old release
++            // disappeared before xdg-shell took ownership.
++            if (display->pointer_sequence_owner
++                    == input_sequence_owner::Android) {
++                send_pointer_button_to_android(display, BTN_LEFT,
++                        WL_POINTER_BUTTON_STATE_RELEASED);
++            }
++            display->active_gesture_task_id.clear();
++            display->pointer_button_serial = serial;
++            display->pointer_button_down = true;
++            auto it = display->layers.find(display->pointer_surface);
++            display->pointer_gesture_task_id = it == display->layers.end()
++                    ? std::string() : it->second.owner_task_id;
++            display->pointer_sequence_owner = input_sequence_owner::Android;
++        } else if (state == WL_POINTER_BUTTON_STATE_RELEASED) {
++            forward_to_android = display->pointer_sequence_owner
++                    == input_sequence_owner::Android;
++            display->pointer_sequence_owner = input_sequence_owner::None;
++            display->pointer_button_down = false;
++            display->pointer_gesture_task_id.clear();
++            display->active_gesture_task_id.clear();
++        }
++    } else if (!display->pointer_surface) {
++        return;
++    }
++    if (forward_to_android)
++        send_pointer_button_to_android(display, button, state);
+ }
+ 
+ static void
+@@ -1143,7 +1622,7 @@ flush_touch_id(struct display *display, int id)
+ 
+ static void
+ touch_handle_down(void *data, struct wl_touch *,
+-          uint32_t, uint32_t, struct wl_surface *surface,
++          uint32_t serial, uint32_t, struct wl_surface *surface,
+           int32_t id, wl_fixed_t x_w, wl_fixed_t y_w)
+ {
+     if (!surface) {
+@@ -1160,8 +1639,27 @@ touch_handle_down(void *data, struct wl_touch *,
+     if (ensure_pipe(display, INPUT_TOUCH))
+         return;
+ 
++    bool forward_to_android = true;
+     int touch_id = create_touch_id(display, id);
+     display->touch_surfaces[id] = surface;
++    if (touch_id >= 0) {
++        std::scoped_lock input_lock(display->input_state_mutex);
++        if (!display->touch_down_active) {
++            // AOSP owns edge/corner classification for this complete sequence.
++            display->active_gesture_task_id.clear();
++            display->touch_down_serial = serial;
++            display->touch_down_active = true;
++            auto it = display->layers.find(surface);
++            display->touch_gesture_task_id = it == display->layers.end()
++                    ? std::string() : it->second.owner_task_id;
++            display->touch_sequence_owner = input_sequence_owner::Android;
++        }
++        forward_to_android = display->touch_sequence_owner
++                != input_sequence_owner::Wayland;
++        ++display->touch_down_count;
++    }
++    if (!forward_to_android)
++        return;
+ 
+     if (clock_gettime(CLOCK_MONOTONIC, &rt) == -1) {
+        ALOGE("%s:%d error in touch clock_gettime: %s",
+@@ -1173,8 +1671,15 @@ touch_handle_down(void *data, struct wl_touch *,
+         x = int(x * display->scale);
+         y = int(y * display->scale);
+     }
+-    x += display->layers[surface].x;
+-    y += display->layers[surface].y;
++    layerFrame input_frame;
++    {
++        std::scoped_lock input_lock(display->input_state_mutex);
++        auto it = display->layers.find(surface);
++        if (it != display->layers.end())
++            input_frame = it->second;
++    }
++    x += input_frame.x;
++    y += input_frame.y;
+ 
+     ADD_EVENT(EV_ABS, ABS_MT_SLOT, touch_id);
+     ADD_EVENT(EV_ABS, ABS_MT_TRACKING_ID, touch_id);
+@@ -1200,6 +1705,25 @@ touch_handle_up(void *data, struct wl_touch *,
+     int touch_id = flush_touch_id(display, id);
+     // Might not exist if we discarded the down event due to a NULL surface
+     if (touch_id != -1) {
++        // Touch bookkeeping must be cleared even if FIFO recovery fails.
++        bool forward_to_android = true;
++        {
++            std::scoped_lock input_lock(display->input_state_mutex);
++            forward_to_android = display->touch_sequence_owner
++                    != input_sequence_owner::Wayland;
++            if (display->touch_down_count > 0)
++                --display->touch_down_count;
++            if (display->touch_down_count == 0) {
++                display->touch_down_active = false;
++                display->touch_down_serial = 0;
++                display->touch_gesture_task_id.clear();
++                display->active_gesture_task_id.clear();
++                display->touch_sequence_owner = input_sequence_owner::None;
++            }
++        }
++        display->touch_surfaces[id] = NULL;
++        if (!forward_to_android)
++            return;
+         if (ensure_pipe(display, INPUT_TOUCH))
+             return;
+ 
+@@ -1207,7 +1731,6 @@ touch_handle_up(void *data, struct wl_touch *,
+             ALOGE("%s:%d error in touch clock_gettime: %s",
+                   __FILE__, __LINE__, strerror(errno));
+         }
+-        display->touch_surfaces[id] = NULL;
+ 
+         ADD_EVENT(EV_ABS, ABS_MT_SLOT, touch_id);
+         ADD_EVENT(EV_ABS, ABS_MT_TRACKING_ID, -1);
+@@ -1228,6 +1751,11 @@ touch_handle_motion(void *data, struct wl_touch *,
+     struct timespec rt;
+     int x, y;
+     unsigned int res, n = 0;
++    {
++        std::scoped_lock input_lock(display->input_state_mutex);
++        if (display->touch_sequence_owner == input_sequence_owner::Wayland)
++            return;
++    }
+ 
+     int touch_id = get_touch_id(display, id);
+     // Might not exist if we discarded the down event due to a NULL surface
+@@ -1245,8 +1773,15 @@ touch_handle_motion(void *data, struct wl_touch *,
+             x = int(x * display->scale);
+             y = int(y * display->scale);
+         }
+-        x += display->layers[display->touch_surfaces[id]].x;
+-        y += display->layers[display->touch_surfaces[id]].y;
++        layerFrame input_frame;
++        {
++            std::scoped_lock input_lock(display->input_state_mutex);
++            auto it = display->layers.find(display->touch_surfaces[id]);
++            if (it != display->layers.end())
++                input_frame = it->second;
++        }
++        x += input_frame.x;
++        y += input_frame.y;
+ 
+         ADD_EVENT(EV_ABS, ABS_MT_SLOT, touch_id);
+         ADD_EVENT(EV_ABS, ABS_MT_TRACKING_ID, touch_id);
+@@ -1266,45 +1801,144 @@ touch_handle_frame(void *, struct wl_touch *)
+ {
+ }
+ 
+-static void
+-touch_handle_cancel(void *data, struct wl_touch *)
++static bool
++send_touch_cancel_to_android(struct display *display)
+ {
+-    struct display* display = (struct display*)data;
+     struct input_event event[6];
+     struct timespec rt;
+-    unsigned int res, n;
+-    int i, id;
++    bool success = true;
+ 
+     if (ensure_pipe(display, INPUT_TOUCH))
+-        return;
+-
++        return false;
+     if (clock_gettime(CLOCK_MONOTONIC, &rt) == -1) {
+-       ALOGE("%s:%d error in touch clock_gettime: %s",
+-            __FILE__, __LINE__, strerror(errno));
++        ALOGE("%s:%d error in touch clock_gettime: %s",
++                __FILE__, __LINE__, strerror(errno));
+     }
++    for (int i = 0; i < MAX_TOUCHPOINTS; i++) {
++        if (display->touch_id[i] == -1)
++            continue;
++        unsigned int n = 0;
++        ADD_EVENT(EV_ABS, ABS_MT_SLOT, i);
++        ADD_EVENT(EV_ABS, ABS_MT_TOOL_TYPE, MT_TOOL_PALM);
++        ADD_EVENT(EV_SYN, SYN_REPORT, 0);
++        ADD_EVENT(EV_ABS, ABS_MT_TOOL_TYPE, MT_TOOL_FINGER);
++        ADD_EVENT(EV_ABS, ABS_MT_TRACKING_ID, -1);
++        ADD_EVENT(EV_SYN, SYN_REPORT, 0);
++        const ssize_t written = write(display->input_fd[INPUT_TOUCH],
++                &event, sizeof(event));
++        if (written < static_cast<ssize_t>(sizeof(event))) {
++            ALOGE("Failed to cancel touch for InputFlinger: %s", strerror(errno));
++            success = false;
++        }
++    }
++    return success;
++}
+ 
+-    // Cancel all touch points.
+-    for (i = 0; i < MAX_TOUCHPOINTS; i++) {
+-        if (display->touch_id[i] != -1) {
+-            id = display->touch_id[i];
+-            display->touch_id[i] = -1;
+-            display->touch_surfaces[id] = NULL;
+-
+-            n = 0;
+-            // Turn finger into palm.
+-            ADD_EVENT(EV_ABS, ABS_MT_SLOT, i);
+-            ADD_EVENT(EV_ABS, ABS_MT_TOOL_TYPE, MT_TOOL_PALM);
+-            ADD_EVENT(EV_SYN, SYN_REPORT, 0);
+-            // Lift off.
+-            ADD_EVENT(EV_ABS, ABS_MT_TOOL_TYPE, MT_TOOL_FINGER);
+-            ADD_EVENT(EV_ABS, ABS_MT_TRACKING_ID, -1);
+-            ADD_EVENT(EV_SYN, SYN_REPORT, 0);
+-
+-            res = write(display->input_fd[INPUT_TOUCH], &event, sizeof(event));
+-            if (res < sizeof(event))
+-                ALOGE("Failed to write event for InputFlinger: %s", strerror(errno));
++static void
++touch_handle_cancel(void *data, struct wl_touch *)
++{
++    struct display* display = (struct display*)data;
++    std::scoped_lock input_lock(display->input_state_mutex);
++    if (display->touch_sequence_owner == input_sequence_owner::Android)
++        send_touch_cancel_to_android(display);
++    for (int i = 0; i < MAX_TOUCHPOINTS; i++) {
++        if (display->touch_id[i] == -1)
++            continue;
++        const int id = display->touch_id[i];
++        display->touch_id[i] = -1;
++        display->touch_surfaces[id] = NULL;
++    }
++    display->touch_down_active = false;
++    display->touch_down_serial = 0;
++    display->touch_down_count = 0;
++    display->touch_gesture_task_id.clear();
++    display->active_gesture_task_id.clear();
++    display->touch_sequence_owner = input_sequence_owner::None;
++}
++
++bool display::begin_task_window_drag(uint32_t task_id, uint32_t ctrl_type)
++{
++    const uint32_t horizontal = ctrl_type & UINT32_C(0x3);
++    const uint32_t vertical = ctrl_type & UINT32_C(0xc);
++    if (task_id == 0 || (ctrl_type & ~UINT32_C(0xf)) != 0
++            || horizontal == UINT32_C(0x3) || vertical == UINT32_C(0xc)) {
++        ALOGI("TASK_XDG_GESTURE task=%u serial=0 input=none aosp_ctrl=%u "
++                "api=none edge=0 accepted=0 reason=invalid-operation",
++                task_id, ctrl_type);
++        return false;
++    }
++    task_window_route route;
++    if (!get_task_window_route(task_id, &route) || !route.enabled)
++        return false;
++
++    uint32_t xdg_edge = XDG_TOPLEVEL_RESIZE_EDGE_NONE;
++    switch (ctrl_type) {
++        case 0: break;
++        case 1: xdg_edge = XDG_TOPLEVEL_RESIZE_EDGE_LEFT; break;
++        case 2: xdg_edge = XDG_TOPLEVEL_RESIZE_EDGE_RIGHT; break;
++        case 4: xdg_edge = XDG_TOPLEVEL_RESIZE_EDGE_TOP; break;
++        case 5: xdg_edge = XDG_TOPLEVEL_RESIZE_EDGE_TOP_LEFT; break;
++        case 6: xdg_edge = XDG_TOPLEVEL_RESIZE_EDGE_TOP_RIGHT; break;
++        case 8: xdg_edge = XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM; break;
++        case 9: xdg_edge = XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_LEFT; break;
++        case 10: xdg_edge = XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_RIGHT; break;
++        default: return false;
++    }
++
++    std::scoped_lock windows_lock(windowsMutex);
++    window *target = nullptr;
++    for (auto &[id, candidate] : windows) {
++        uint32_t candidate_task_id = 0;
++        if (candidate && candidate->get_numeric_task_id(&candidate_task_id)
++                && candidate_task_id == task_id) {
++            target = candidate.get();
++            break;
++        }
++    }
++    if (!target || !target->xdg_toplevel || !seat)
++        return false;
++
++    uint32_t serial = 0;
++    const char *input = "none";
++    {
++        // Lock order is always windowsMutex -> input_state_mutex.
++        std::scoped_lock input_lock(input_state_mutex);
++        if (!active_gesture_task_id.empty())
++            return false;
++        if (pointer_button_down && pointer_gesture_task_id == target->taskID
++                && pointer_sequence_owner == input_sequence_owner::Android) {
++            serial = pointer_button_serial;
++            input = "pointer";
++            if (!send_pointer_button_to_android(this, BTN_LEFT,
++                    WL_POINTER_BUTTON_STATE_RELEASED)) {
++                return false;
++            }
++            pointer_sequence_owner = input_sequence_owner::Wayland;
++        } else if (touch_down_active
++                && touch_gesture_task_id == target->taskID
++                && touch_sequence_owner == input_sequence_owner::Android) {
++            serial = touch_down_serial;
++            input = "touch";
++            if (!send_touch_cancel_to_android(this))
++                return false;
++            touch_sequence_owner = input_sequence_owner::Wayland;
+         }
++        if (serial == 0)
++            return false;
++        active_gesture_task_id = target->taskID;
+     }
++
++    const char *api = "move";
++    if (ctrl_type == 0) {
++        xdg_toplevel_move(target->xdg_toplevel, seat, serial);
++    } else {
++        api = "resize";
++        xdg_toplevel_resize(target->xdg_toplevel, seat, serial, xdg_edge);
++    }
++    ALOGI("TASK_XDG_GESTURE task=%u serial=%u input=%s aosp_ctrl=%u "
++            "api=%s edge=%u accepted=1", task_id, serial, input,
++            ctrl_type, api, xdg_edge);
++    return true;
+ }
+ 
+ static void
+@@ -1938,8 +2572,15 @@ tablet_tool_motion(void *data, struct zwp_tablet_tool_v2 *,
+             x = int(x * display->scale);
+             y = int(y * display->scale);
+         }
+-        x += display->layers[display->tablet_surface].x;
+-        y += display->layers[display->tablet_surface].y;
++        layerFrame input_frame;
++        {
++            std::scoped_lock input_lock(display->input_state_mutex);
++            auto it = display->layers.find(display->tablet_surface);
++            if (it != display->layers.end())
++                input_frame = it->second;
++        }
++        x += input_frame.x;
++        y += input_frame.y;
+ 
+         ADD_EVENT(EV_ABS, ABS_X, x);
+         ADD_EVENT(EV_ABS, ABS_Y, y);
+@@ -2253,12 +2894,413 @@ wayland_log_handler (const char *format, va_list args)
+     LOG_PRI_VA (ANDROID_LOG_ERROR, "wayland-hwc", format, args);
+ }
+ 
+-window *open_windows::add(waydroid_hwc_composer_device_1 *pdev, const std::string& key, const std::string& aid, const std::string& tid, hwc_color_t color) {
++bool display::set_task_window_route(uint32_t task_id,
++        const task_window_route &route) {
++    if (task_id == 0)
++        return false;
++    if (route.enabled && (route.display_id != 0 || route.app_id.empty()
++            || route.component.size() > 4096 || route.title.size() > 4096
++            || route.app_id.size() > 4096)) {
++        return false;
++    }
++    {
++        std::scoped_lock lock(task_window_route_mutex);
++        if (route.enabled) {
++            task_window_routes[task_id] = route;
++        } else {
++            task_window_routes.erase(task_id);
++        }
++    }
++    if (!route.enabled) {
++        std::scoped_lock lock(task_window_state_mutex);
++        pending_task_window_states.erase(task_id);
++        task_window_states.erase(task_id);
++    }
++    if (procs && procs->invalidate)
++        procs->invalidate(procs);
++    return true;
++}
++
++void display::clear_task_window_routes() {
++    {
++        std::scoped_lock lock(task_window_route_mutex);
++        task_window_routes.clear();
++    }
++    {
++        std::scoped_lock lock(task_window_state_mutex);
++        pending_task_window_states.clear();
++        task_window_states.clear();
++    }
++    if (procs && procs->invalidate)
++        procs->invalidate(procs);
++}
++
++bool display::get_task_window_route(uint32_t task_id,
++        task_window_route *route) {
++    if (!route)
++        return false;
++    std::scoped_lock lock(task_window_route_mutex);
++    const auto it = task_window_routes.find(task_id);
++    if (it == task_window_routes.end())
++        return false;
++    *route = it->second;
++    return true;
++}
++
++std::map<uint32_t, task_window_route> display::get_task_window_routes() {
++    std::scoped_lock lock(task_window_route_mutex);
++    return task_window_routes;
++}
++
++void display::set_full_ui_requested(bool requested) {
++    {
++        std::scoped_lock lock(task_window_route_mutex);
++        if (full_ui_requested == requested)
++            return;
++        full_ui_requested = requested;
++    }
++    property_set("waydroid.full_ui_active", requested ? "true" : "false");
++    if (procs && procs->invalidate)
++        procs->invalidate(procs);
++}
++
++bool display::is_full_ui_requested() {
++    std::scoped_lock lock(task_window_route_mutex);
++    return full_ui_requested;
++}
++
++static bool execute_task_command(struct display *display,
++        sp<IWaydroidTask> &task, const task_command &command) {
++    if (command.type == task_command_type::WindowBoundsRequest
++            || command.type == task_command_type::WindowStateRequest
++            || command.type == task_command_type::WindowStateQuery) {
++        return display->notify_task_window_state(command);
++    }
++    if (task == nullptr)
++        task = IWaydroidTask::getService();
++    if (task == nullptr) {
++        ALOGE("task command generation=%" PRIu64 " has no HAL service",
++                command.generation);
++        return false;
++    }
++    switch (command.type) {
++        case task_command_type::Focus: {
++            const auto result = task->setFocusedTask(command.task_id);
++            return result.isOk();
++        }
++        case task_command_type::Remove: {
++            const auto result = task->removeTask(command.task_id);
++            return result.isOk();
++        }
++        case task_command_type::Resize: {
++            const auto result = task->resizeTask(command.task_id, command.left,
++                    command.top, command.right, command.bottom,
++                    command.resize_mode);
++            if (!result.isOk())
++                return false;
++            if (!result.withDefault(false))
++                ALOGE("task %u resize generation=%" PRIu64 " rejected",
++                        command.task_id, command.generation);
++            return true;
++        }
++        case task_command_type::WindowBoundsRequest:
++        case task_command_type::WindowStateRequest:
++        case task_command_type::WindowStateQuery:
++            break;
++    }
++    return true;
++}
++
++static void *task_command_worker(void *data) {
++    auto *display = static_cast<struct display *>(data);
++    sp<IWaydroidTask> task = display->task;
++    while (true) {
++        task_command command;
++        {
++            std::unique_lock lock(display->task_command_mutex);
++            display->task_command_cv.wait(lock, [&](){
++                return display->task_command_stop
++                        || !display->task_commands.empty();
++            });
++            if (display->task_command_stop && display->task_commands.empty())
++                break;
++            command = display->task_commands.front();
++            display->task_commands.pop_front();
++        }
++        bool completed = false;
++        for (int attempt = 0; attempt < 2 && !completed; ++attempt) {
++            completed = execute_task_command(display, task, command);
++            if (!completed)
++                task = nullptr;
++        }
++        if (!completed)
++            ALOGE("task command generation=%" PRIu64 " failed twice",
++                    command.generation);
++    }
++    return nullptr;
++}
++
++void display::start_task_command_worker() {
++    task_command_stop = false;
++    const int result = pthread_create(&task_command_thread, nullptr,
++            task_command_worker, this);
++    if (result != 0) {
++        ALOGE("failed to start task-command worker: %s", strerror(result));
++        return;
++    }
++    task_command_thread_started = true;
++}
++
++void display::stop_task_command_worker() {
++    if (!task_command_thread_started)
++        return;
++    {
++        std::scoped_lock lock(task_command_mutex);
++        task_command_stop = true;
++    }
++    task_command_cv.notify_one();
++    pthread_join(task_command_thread, nullptr);
++    task_command_thread_started = false;
++}
++
++static uint64_t enqueue_task_command(struct display *display,
++        task_command command) {
++    command.generation = display->next_task_command_generation.fetch_add(
++            1, std::memory_order_relaxed);
++    {
++        std::scoped_lock lock(display->task_command_mutex);
++        if (!display->task_command_thread_started || display->task_command_stop) {
++            ALOGE("dropping task command generation=%" PRIu64
++                    " because worker is stopped", command.generation);
++            return 0;
++        }
++        auto &commands = display->task_commands;
++        if (command.type == task_command_type::Resize) {
++            for (auto it = commands.rbegin(); it != commands.rend(); ++it) {
++                if (it->type == task_command_type::Resize
++                        && it->task_id == command.task_id) {
++                    *it = command;
++                    display->task_command_cv.notify_one();
++                    return command.generation;
++                }
++            }
++        } else if (command.type == task_command_type::Focus) {
++            commands.erase(std::remove_if(commands.begin(), commands.end(),
++                    [](const task_command &queued) {
++                        return queued.type == task_command_type::Focus;
++                    }), commands.end());
++        } else if (command.type == task_command_type::Remove) {
++            commands.erase(std::remove_if(commands.begin(), commands.end(),
++                    [&](const task_command &queued) {
++                        return queued.task_id == command.task_id
++                                && (queued.type == task_command_type::Focus
++                                    || queued.type == task_command_type::Resize);
++                    }), commands.end());
++        } else if (command.type == task_command_type::WindowBoundsRequest) {
++            commands.erase(std::remove_if(commands.begin(), commands.end(),
++                    [&](const task_command &queued) {
++                        return queued.type == task_command_type::WindowBoundsRequest
++                                && queued.task_id == command.task_id;
++                    }), commands.end());
++        } else if (command.type == task_command_type::WindowStateRequest) {
++            commands.erase(std::remove_if(commands.begin(), commands.end(),
++                    [&](const task_command &queued) {
++                        return queued.type == task_command_type::WindowStateRequest
++                                && queued.task_id == command.task_id;
++                    }), commands.end());
++        } else if (command.type == task_command_type::WindowStateQuery) {
++            commands.erase(std::remove_if(commands.begin(), commands.end(),
++                    [&](const task_command &queued) {
++                        return queued.type == task_command_type::WindowStateQuery
++                                && queued.task_id == command.task_id;
++                    }), commands.end());
++        }
++        commands.push_back(command);
++    }
++    display->task_command_cv.notify_one();
++    return command.generation;
++}
++
++uint64_t display::enqueue_task_focus(uint32_t task_id) {
++    task_command command;
++    command.type = task_command_type::Focus;
++    command.task_id = task_id;
++    return enqueue_task_command(this, command);
++}
++
++uint64_t display::enqueue_task_remove(uint32_t task_id) {
++    task_command command;
++    command.type = task_command_type::Remove;
++    command.task_id = task_id;
++    return enqueue_task_command(this, command);
++}
++
++uint64_t display::enqueue_task_resize(uint32_t task_id, int32_t left,
++        int32_t top, int32_t right, int32_t bottom, int32_t resize_mode) {
++    task_command command;
++    command.type = task_command_type::Resize;
++    command.task_id = task_id;
++    command.left = left;
++    command.top = top;
++    command.right = right;
++    command.bottom = bottom;
++    command.resize_mode = resize_mode;
++    return enqueue_task_command(this, command);
++}
++
++uint64_t display::enqueue_task_window_bounds_request(uint32_t task_id,
++        const task_window_bounds &bounds, bool drag_resizing) {
++    task_command command;
++    command.type = task_command_type::WindowBoundsRequest;
++    command.task_id = task_id;
++    command.window_bounds = bounds;
++    command.drag_resizing = drag_resizing;
++    return enqueue_task_command(this, command);
++}
++
++uint64_t display::enqueue_task_window_state_request(uint32_t task_id,
++        waydroid_task_window_state state, const task_window_bounds &bounds) {
++    task_command command;
++    command.type = task_command_type::WindowStateRequest;
++    command.task_id = task_id;
++    command.window_state = state;
++    command.window_bounds = bounds;
++    return enqueue_task_command(this, command);
++}
++
++uint64_t display::enqueue_task_window_state_query(uint32_t task_id) {
++    task_command command;
++    command.type = task_command_type::WindowStateQuery;
++    command.task_id = task_id;
++    return enqueue_task_command(this, command);
++}
++
++bool display::queue_task_window_state(const task_window_state_update &update) {
++    if (update.generation == 0
++            || (update.task_id == 0
++                && update.state != waydroid_task_window_state::FullUi)
++            || (update.task_id != 0
++                && update.state == waydroid_task_window_state::FullUi)) {
++        return false;
++    }
++    if (update.task_id != 0) {
++        task_window_route route;
++        if (!get_task_window_route(update.task_id, &route) || !route.enabled)
++            return false;
++    }
++    {
++        std::scoped_lock lock(task_window_state_mutex);
++        pending_task_window_states[update.task_id] = update;
++        task_window_states[update.task_id] = update;
++    }
++    if (procs && procs->invalidate)
++        procs->invalidate(procs);
++    return true;
++}
++
++std::vector<task_window_state_update>
++display::take_pending_task_window_states() {
++    std::vector<task_window_state_update> updates;
++    std::scoped_lock lock(task_window_state_mutex);
++    updates.reserve(pending_task_window_states.size());
++    for (const auto &[task_id, update] : pending_task_window_states) {
++        updates.push_back(update);
++    }
++    pending_task_window_states.clear();
++    return updates;
++}
++
++bool display::get_task_window_state(uint32_t task_id,
++        task_window_state_update *update) {
++    if (!update)
++        return false;
++    std::scoped_lock lock(task_window_state_mutex);
++    const auto it = task_window_states.find(task_id);
++    if (it == task_window_states.end())
++        return false;
++    *update = it->second;
++    return true;
++}
++
++void display::set_task_window_state_notifier(
++        std::function<bool(const task_command &)> notifier) {
++    std::scoped_lock lock(task_window_state_mutex);
++    task_window_state_notifier = std::move(notifier);
++}
++
++bool display::notify_task_window_state(const task_command &command) {
++    std::function<bool(const task_command &)> notifier;
++    {
++        std::scoped_lock lock(task_window_state_mutex);
++        notifier = task_window_state_notifier;
++    }
++    return notifier && notifier(command);
++}
++
++static void retired_windows_sync_done(void *data, struct wl_callback *callback,
++        uint32_t) {
++    auto *display = static_cast<struct display *>(data);
++    std::vector<std::unique_ptr<window>> retired;
++    {
++        std::scoped_lock lock(display->retired_windows_mutex);
++        display->retirement_sync_pending = false;
++        retired.swap(display->retired_windows);
++    }
++    wl_callback_destroy(callback);
++    // The final owners are released only from a serialized Wayland
++    // event callback.  window::~window() waits for any listener body.
++    retired.clear();
++}
++
++static const struct wl_callback_listener retired_windows_sync_listener = {
++    retired_windows_sync_done,
++};
++
++void display::retire_window(std::unique_ptr<window> retired) {
++    if (!retired)
++        return;
++    bool request_sync = false;
++    {
++        std::scoped_lock lock(retired_windows_mutex);
++        retired_windows.push_back(std::move(retired));
++        if (!retirement_sync_pending) {
++            retirement_sync_pending = true;
++            request_sync = true;
++        }
++    }
++    if (!request_sync)
++        return;
++    struct wl_callback *callback = wl_display_sync(display);
++    if (!callback) {
++        std::scoped_lock lock(retired_windows_mutex);
++        retirement_sync_pending = false;
++        ALOGE("failed to schedule Wayland window retirement");
++        return;
++    }
++    wl_callback_add_listener(callback, &retired_windows_sync_listener, this);
++    if (wl_display_flush(display) < 0 && errno != EAGAIN)
++        ALOGE("failed to flush Wayland window retirement: %s", strerror(errno));
++}
++
++void open_windows::retire(std::unique_ptr<window> retired) {
++    assert(owner);
++    owner->retire_window(std::move(retired));
++}
++
++window *open_windows::add(waydroid_hwc_composer_device_1 *pdev, const std::string& key, const std::string& aid, const std::string& tid, hwc_color_t color, const hwc_rect_t *task_bounds) {
+     window *window = nullptr;
+     update([&](){
++        auto created = window::create(pdev->display, pdev->should_compose,
++                aid, tid, color, task_bounds);
++        uint32_t task_id = 0;
++        task_window_state_update state;
++        if (created && created->get_numeric_task_id(&task_id)
++                && pdev->display->get_task_window_state(task_id, &state)) {
++            created->apply_task_window_state(state);
++        }
+         auto res = windows.emplace(
+             key,
+-            window::create(pdev->display, pdev->should_compose, aid, tid, color)
++            std::move(created)
+         );
+         assert(res.second);
+         window = res.first->second.get();
+@@ -2277,21 +3319,30 @@ void open_windows::add(const std::string& key, std::unique_ptr<window> window) {
+ }
+ 
+ void open_windows::clear() {
+-    windows.clear();
+-    property_set("waydroid.open_windows", "0");
++    update([&](){
++        for (auto& [key, window] : windows)
++            retire(std::move(window));
++        windows.clear();
++    });
+ }
+ 
+-void open_windows::erase(const_iterator pos) {
++void open_windows::erase(iterator pos) {
+     update([&](){
++        auto retired = std::move(pos->second);
+         windows.erase(pos);
++        retire(std::move(retired));
+     });
+ }
+ 
+ void open_windows::erase(const key_type& key) {
+-    if (windows.erase(key) > 0) {
+-        std::string windows_size_str = std::to_string(windows.size());
+-        property_set("waydroid.open_windows", windows_size_str.c_str());
+-    }
++    update([&](){
++        auto pos = windows.find(key);
++        if (pos == windows.end())
++            return;
++        auto retired = std::move(pos->second);
++        windows.erase(pos);
++        retire(std::move(retired));
++    });
+ }
+ 
+ static void* hwc_wayland_thread(void* data) {
+@@ -2316,6 +3367,7 @@ create_display(const char *gralloc)
+         ALOGE("out of memory");
+         return NULL;
+     }
++    display->windows.set_owner(display);
+     wl_log_set_handler_client(wayland_log_handler);
+     display->system_version = property_get_int32("ro.system.build.version.sdk", 0);
+     display->gtype = get_gralloc_type(gralloc);
+@@ -2354,14 +3406,22 @@ create_display(const char *gralloc)
+     }
+ 
+     display->task = IWaydroidTask::getService();
++    display->start_task_command_worker();
+     return display;
+ }
+ 
+ void
+ destroy_display(struct display *display)
+ {
++    display->windows.clear();
++    // The roundtrip is ordered after the retirement sync request.
++    // It drains final window owners before the display thread stops.
++    if (wl_display_roundtrip(display->display) < 0)
++        ALOGE("failed to drain retired Wayland windows during shutdown");
++
+     pthread_kill(display->wayland_thread, SIGTERM);
+     pthread_join(display->wayland_thread, nullptr);
++    display->stop_task_command_worker();
+ 
+     if (display->wm_base)
+         xdg_wm_base_destroy(display->wm_base);
+diff --git a/hwcomposer/wayland-hwc.h b/hwcomposer/wayland-hwc.h
+index 823ca73..158c637 100644
+--- a/hwcomposer/wayland-hwc.h
++++ b/hwcomposer/wayland-hwc.h
+@@ -46,6 +46,12 @@
+ #include <list>
+ #include <set>
+ #include <pthread.h>
++#include <atomic>
++#include <mutex>
++#include <condition_variable>
++#include <deque>
++#include <memory>
++#include <vector>
+ #include <semaphore.h>
+ #include <hardware/hwcomposer.h>
+ #include <cutils/properties.h>
+@@ -89,8 +95,68 @@ enum class GrallocType {
+ #define MAX_TOUCHPOINTS 10
+ 
+ struct layerFrame {
+-    int x;
+-    int y;
++    int x = 0;
++    int y = 0;
++    std::string owner_task_id;
++};
++
++enum class input_sequence_owner {
++    None,
++    Android,
++    Wayland,
++};
++
++enum class waydroid_task_window_state : uint32_t {
++    Normal = 0,
++    Maximized = 1,
++    Minimized = 2,
++    FullUi = 3,
++};
++
++enum class waydroid_task_window_state_source : uint32_t {
++    Android = 0,
++    Host = 1,
++    Reconcile = 2,
++};
++
++struct task_window_bounds {
++    int32_t left = 0;
++    int32_t top = 0;
++    int32_t right = 0;
++    int32_t bottom = 0;
++};
++
++struct task_window_state_update {
++    uint32_t task_id = 0;
++    waydroid_task_window_state state = waydroid_task_window_state::Normal;
++    task_window_bounds restore_bounds;
++    waydroid_task_window_state_source source =
++            waydroid_task_window_state_source::Android;
++    uint64_t generation = 0;
++};
++
++enum class task_command_type {
++    Focus,
++    Remove,
++    Resize,
++    WindowBoundsRequest,
++    WindowStateRequest,
++    WindowStateQuery,
++};
++
++struct task_command {
++    task_command_type type = task_command_type::Focus;
++    uint32_t task_id = 0;
++    int32_t left = 0;
++    int32_t top = 0;
++    int32_t right = 0;
++    int32_t bottom = 0;
++    int32_t resize_mode = 0;
++    bool drag_resizing = false;
++    waydroid_task_window_state window_state =
++            waydroid_task_window_state::Normal;
++    task_window_bounds window_bounds;
++    uint64_t generation = 0;
+ };
+ 
+ struct handleExt {
+@@ -107,23 +173,24 @@ struct buffer_metadata {
+     uint32_t width;
+     uint32_t pixel_stride;
+     uint32_t format;
++    // Stable across Binder-native-handle clones for minigbm buffers.
++    uint64_t buffer_id;
+ };
+ constexpr bool operator==(const buffer_metadata &lhs, const buffer_metadata &rhs) {
+     return lhs.height == rhs.height
+            && lhs.width == rhs.width
+            && lhs.pixel_stride == rhs.pixel_stride
+-           && lhs.format == rhs.format;
++           && lhs.format == rhs.format
++           && lhs.buffer_id == rhs.buffer_id;
+ }
+ constexpr bool operator!=(const buffer_metadata &lhs, const buffer_metadata &rhs) {
+-    return lhs.height != rhs.height
+-           || lhs.width != rhs.width
+-           || lhs.pixel_stride != rhs.pixel_stride
+-           || lhs.format != rhs.format;
++    return !(lhs == rhs);
+ }
+ 
+ struct buffer {
+     struct wl_buffer *wl_buffer = nullptr;
+ 
++    // Owned clone used by SHM snapshots and released in ~buffer().
+     buffer_handle_t handle = nullptr;
+     buffer_metadata metadata {};
+ 
+@@ -134,6 +201,14 @@ struct buffer {
+     ~buffer();
+ };
+ 
++struct task_window_route {
++    bool enabled = false;
++    int32_t display_id = -1;
++    std::string component;
++    std::string title;
++    std::string app_id;
++};
++
+ enum class BufferTransform : int32_t {
+     Normal = WL_OUTPUT_TRANSFORM_NORMAL,
+     Rot_90 = WL_OUTPUT_TRANSFORM_90,
+@@ -150,9 +225,11 @@ BufferTransform hwc_transform_to_buffer_transform(uint32_t hwc_transform);
+ struct surface_context {
+     struct wl_surface *surface;
+     struct wp_viewport *viewport;
++    bool owns_resources = true;
+ 
+     surface_context() = default;
+-    surface_context(wl_surface *surface, wp_viewport *viewport);
++    surface_context(wl_surface *surface, wp_viewport *viewport,
++                    bool owns_resources = true);
+     ~surface_context();
+ 
+     surface_context(surface_context &&other);
+@@ -203,27 +280,88 @@ struct window {
+     std::unique_ptr<buffer> snapshot_buffer;
+ 
+     std::string appID;
++    std::string title;
++    std::string component;
+     std::string taskID;
+ 
++    // Android display-space bounds for this task.  Child Wayland
++    // surfaces are positioned relative to this origin.
++    int task_left = 0;
++    int task_top = 0;
++    int task_right = 0;
++    int task_bottom = 0;
++    bool task_bounds_valid = false;
++    // Compat keeps Android WM authoritative but still needs a local
++    // origin for child surfaces when a task crosses x=0/y=0.
++    int layer_origin_x = 0;
++    int layer_origin_y = 0;
++    bool layer_origin_valid = false;
++    std::atomic<bool> task_resize_enabled{false};
++    int last_task_resize_width = -1;
++    int last_task_resize_height = -1;
++    std::atomic<uint64_t> pending_task_configure_size{0};
++    int last_host_configure_width = -1;
++    int last_host_configure_height = -1;
++    // Mutter may finish an interactive resize with a 0x0 configure.
++    // Retain the last concrete size so the final non-resizing state
++    // still reaches Android WM Shell.
++    int last_queued_task_configure_width = -1;
++    int last_queued_task_configure_height = -1;
++    bool host_drag_resizing = false;
++    bool taken_task_drag_resizing = false;
++    bool taken_task_state_transition = false;
++    // Logical size last configured by the host compositor.  Once a
++    // task has an xdg configure, Android's asynchronous old frame must
++    // not resize the transparent carrier back to the previous size.
++    int host_carrier_width = -1;
++    int host_carrier_height = -1;
++    waydroid_task_window_state observed_task_window_state =
++            waydroid_task_window_state::Normal;
++    waydroid_task_window_state requested_task_window_state =
++            waydroid_task_window_state::Normal;
++    bool task_window_state_ack_pending = false;
++    bool host_task_window_state_request_pending = false;
++    uint64_t requested_task_window_generation = 0;
++
++    // Synchronizes callback completion with window destruction without
++    // taking display::windowsMutex during a blocking roundtrip.
++    std::mutex toplevel_callback_mutex;
++
+     std::atomic<bool> configured;
+ 
+     // Reset every hwc_set cycle
+     struct wl_region* input_region;
+     int lastLayer;
+     struct buffer *last_layer_buffer;
++    // Tracks the first app/snapshot buffer without changing its child ownership.
++    bool primary_layer_submitted = false;
+ 
+     ~window();
+ 
+-    static std::unique_ptr<window> create(struct display *display, bool use_subsurfaces, std::string appID, std::string taskID, hwc_color_t color);
++    static std::unique_ptr<window> create(struct display *display, bool use_subsurfaces, std::string appID, std::string taskID, hwc_color_t color, const hwc_rect_t *task_bounds = nullptr);
+ 
+     window::layer &get_next_layer();
+     window::layer &create_new_layer();
+     void reset_per_set_state();
++    void set_task_bounds(const hwc_rect_t &bounds);
++    void set_layer_origin(int left, int top);
++    void enable_task_resize();
++    bool get_numeric_task_id(uint32_t *task_id) const;
++    void queue_task_configure(int32_t width, int32_t height,
++            bool drag_resizing, bool state_transition);
++    bool take_task_configure(int32_t *width, int32_t *height);
++    bool host_carrier_configured() const;
++    void apply_task_carrier_configure(int32_t width, int32_t height);
++    void handle_task_configure(int32_t width, int32_t height);
++    void apply_task_window_state(const task_window_state_update &update);
++    bool observe_task_window_state(waydroid_task_window_state state,
++            bool activated);
+ 
+     void minimize();
+     void set_maximize(bool enabled);
+     void set_title(const char *title);
+     void set_app_id(std::string appID);
++    void set_task_metadata(const task_window_route &route);
+ 
+   private:
+     window() = default;
+@@ -232,8 +370,12 @@ struct window {
+ class open_windows {
+     using Collection = std::map<std::string, std::unique_ptr<window>>;
+     Collection windows;
++    struct display *owner = nullptr;
++
++    void retire(std::unique_ptr<window> retired);
+ 
+   public:
++    void set_owner(struct display *display_owner) { owner = display_owner; }
+     using key_type = Collection::key_type;
+     using mapped_type = Collection::mapped_type;
+     using size_type = Collection::size_type;
+@@ -272,17 +414,19 @@ class open_windows {
+         property_set("waydroid.open_windows", windows_size_str.c_str());
+     }
+ 
+-    window *add(waydroid_hwc_composer_device_1 *pdev, const std::string& key, const std::string& aid, const std::string& tid, hwc_color_t color = {0, 0, 0, 255});
++    window *add(waydroid_hwc_composer_device_1 *pdev, const std::string& key, const std::string& aid, const std::string& tid, hwc_color_t color = {0, 0, 0, 255}, const hwc_rect_t *task_bounds = nullptr);
+     void add(const std::string& key, std::unique_ptr<window> window);
+     void clear();
+-    void erase(const_iterator pos);
++    void erase(iterator pos);
+     void erase(const key_type& key);
+     template<class Pred>
+     void erase_if(Pred pred) {
+         update([&](){
+             for (auto it = windows.begin(), end = windows.end(); it != end;) {
+                 if (pred(*it)) {
++                    auto retired = std::move(it->second);
+                     it = windows.erase(it);
++                    retire(std::move(retired));
+                 } else {
+                     ++it;
+                 }
+@@ -349,9 +493,18 @@ struct display {
+     int gesturePosY;
+     int gestureLength;
+     int touch_id[MAX_TOUCHPOINTS];
++    // Never use windowsMutex from a Wayland input callback: window
++    // creation can hold it while waiting for that callback thread.
++    std::mutex input_state_mutex;
+     std::map<struct wl_surface *, struct layerFrame> layers;
++    input_sequence_owner pointer_sequence_owner = input_sequence_owner::None;
++    input_sequence_owner touch_sequence_owner = input_sequence_owner::None;
+ 
+     open_windows windows;
++    std::mutex retired_windows_mutex;
++    std::vector<std::unique_ptr<window>> retired_windows;
++    bool retirement_sync_pending = false;
++    void retire_window(std::unique_ptr<window> retired);
+     std::set<std::string> ignored_apps;
+     std::recursive_mutex windowsMutex;
+ 
+@@ -364,6 +517,14 @@ struct display {
+     std::string clipboard;
+     std::list<std::string> clipboard_offer_mime_types;
+     uint32_t pointer_enter_serial;
++    uint32_t pointer_button_serial = 0;
++    bool pointer_button_down = false;
++    std::string pointer_gesture_task_id;
++    uint32_t touch_down_serial = 0;
++    bool touch_down_active = false;
++    unsigned int touch_down_count = 0;
++    std::string touch_gesture_task_id;
++    std::string active_gesture_task_id;
+     struct {float x; float y;} cursor_hotspot;
+ 
+     EGLDisplay egl_dpy;
+@@ -385,15 +546,60 @@ struct display {
+     std::map<uint32_t, std::string> layer_names;
+     std::map<uint32_t, struct handleExt> layer_handles_ext;
+     struct handleExt target_layer_handle_ext;
+-    std::unordered_map<buffer_handle_t, std::unique_ptr<buffer>> buffer_map;
++    std::unordered_map<uint64_t, std::unique_ptr<buffer>> buffer_map;
+     std::array<uint8_t, 239> keysDown;
+ 
+     std::unique_ptr<cursor_handler> cursor_handler;
+     bool supports_cursor_viewport;
+     bool supports_cursor_hw_buffer;
+ 
++    std::mutex task_window_route_mutex;
++    std::map<uint32_t, task_window_route> task_window_routes;
++    bool full_ui_requested = false;
++    bool set_task_window_route(uint32_t task_id,
++            const task_window_route &route);
++    void clear_task_window_routes();
++    bool get_task_window_route(uint32_t task_id,
++            task_window_route *route);
++    std::map<uint32_t, task_window_route> get_task_window_routes();
++    void set_full_ui_requested(bool requested);
++    bool is_full_ui_requested();
++
+     bool isMaximized;
+     sp<IWaydroidTask> task;
++    pthread_t task_command_thread;
++    bool task_command_thread_started = false;
++    bool task_command_stop = false;
++    std::mutex task_command_mutex;
++    std::condition_variable task_command_cv;
++    std::deque<task_command> task_commands;
++    std::atomic<uint64_t> next_task_command_generation{1};
++    void start_task_command_worker();
++    void stop_task_command_worker();
++    bool begin_task_window_drag(uint32_t task_id, uint32_t ctrl_type);
++    uint64_t enqueue_task_focus(uint32_t task_id);
++    uint64_t enqueue_task_remove(uint32_t task_id);
++    uint64_t enqueue_task_resize(uint32_t task_id, int32_t left,
++            int32_t top, int32_t right, int32_t bottom,
++            int32_t resize_mode);
++    uint64_t enqueue_task_window_bounds_request(uint32_t task_id,
++            const task_window_bounds &bounds, bool drag_resizing);
++    uint64_t enqueue_task_window_state_request(uint32_t task_id,
++            waydroid_task_window_state state,
++            const task_window_bounds &bounds);
++    uint64_t enqueue_task_window_state_query(uint32_t task_id);
++
++    std::mutex task_window_state_mutex;
++    std::map<uint32_t, task_window_state_update> pending_task_window_states;
++    std::map<uint32_t, task_window_state_update> task_window_states;
++    std::function<bool(const task_command &)> task_window_state_notifier;
++    bool queue_task_window_state(const task_window_state_update &update);
++    std::vector<task_window_state_update> take_pending_task_window_states();
++    bool get_task_window_state(uint32_t task_id,
++            task_window_state_update *update);
++    void set_task_window_state_notifier(
++            std::function<bool(const task_command &)> notifier);
++    bool notify_task_window_state(const task_command &command);
+ 
+     const hwc_procs_t *procs;
+     bool needHotplug;
+diff --git a/interfaces/task/1.0/IWaydroidTask.hal b/interfaces/task/1.0/IWaydroidTask.hal
+index 9d1a42a..871b91b 100644
+--- a/interfaces/task/1.0/IWaydroidTask.hal
++++ b/interfaces/task/1.0/IWaydroidTask.hal
+@@ -20,4 +20,8 @@ interface IWaydroidTask {
+     removeTask(uint32_t taskID);
+     removeAllVisibleRecentTasks();
+     getAppName(string packageName) generates (string name);
++    /** Forward a Wayland configure to A16 ActivityTaskManager. */
++    resizeTask(uint32_t taskID, int32_t left, int32_t top,
++            int32_t right, int32_t bottom, int32_t resizeMode)
++            generates (bool success);
+ };
+diff --git a/interfaces/task/1.0/default/WaydroidTask.cpp b/interfaces/task/1.0/default/WaydroidTask.cpp
+index 392b718..807ae0b 100644
+--- a/interfaces/task/1.0/default/WaydroidTask.cpp
++++ b/interfaces/task/1.0/default/WaydroidTask.cpp
+@@ -61,6 +61,19 @@ Return<void> WaydroidTask::removeAllVisibleRecentTasks() {
+     return Void();
+ }
+ 
++Return<bool> WaydroidTask::resizeTask(uint32_t taskID, int32_t left, int32_t top,
++        int32_t right, int32_t bottom, int32_t resizeMode) {
++    if (mActivityTaskManager == nullptr) {
++        sp<IBinder> binderTask = android::defaultServiceManager()->getService(android::String16("activity_task"));
++        if (binderTask != nullptr)
++            mActivityTaskManager = android::interface_cast<IActivityTaskManager>(binderTask);
++    }
++    if (mActivityTaskManager == nullptr)
++        return false;
++    return mActivityTaskManager->resizeTask(static_cast<int32_t>(taskID),
++            left, top, right, bottom, resizeMode).isOk();
++}
++
+ Return<void> WaydroidTask::getAppName(const hidl_string& packageName, getAppName_cb _hidl_cb) {
+     android::String16 AppName;
+     if (mPlatform == nullptr) {
+diff --git a/interfaces/task/1.0/default/WaydroidTask.h b/interfaces/task/1.0/default/WaydroidTask.h
+index b2d3f0f..62b4d8d 100644
+--- a/interfaces/task/1.0/default/WaydroidTask.h
++++ b/interfaces/task/1.0/default/WaydroidTask.h
+@@ -49,6 +49,8 @@ struct WaydroidTask : public IWaydroidTask {
+     Return<void> removeTask(uint32_t taskID) override;
+     Return<void> removeAllVisibleRecentTasks() override;
+     Return<void> getAppName(const hidl_string& packageName, getAppName_cb _hidl_cb) override;
++    Return<bool> resizeTask(uint32_t taskID, int32_t left, int32_t top,
++            int32_t right, int32_t bottom, int32_t resizeMode) override;
+   private:
+     sp<IActivityTaskManager> mActivityTaskManager;
+     sp<IPlatform> mPlatform;
+diff --git a/interfaces/task/1.0/default/binder-interfaces/IActivityTaskManager.cpp b/interfaces/task/1.0/default/binder-interfaces/IActivityTaskManager.cpp
+index 8c21235..e01dda4 100644
+--- a/interfaces/task/1.0/default/binder-interfaces/IActivityTaskManager.cpp
++++ b/interfaces/task/1.0/default/binder-interfaces/IActivityTaskManager.cpp
+@@ -23,6 +23,11 @@ IMPLEMENT_META_INTERFACE(ActivityTaskManager, "android.app.IActivityTaskManager"
+   return ::android::binder::Status::fromStatusT(::android::UNKNOWN_TRANSACTION);
+ }
+ 
++::android::binder::Status IActivityTaskManagerDefault::resizeTask(int32_t, int32_t, int32_t,
++    int32_t, int32_t, int32_t) {
++  return ::android::binder::Status::fromStatusT(::android::UNKNOWN_TRANSACTION);
++}
++
+ }  // namespace app
+ 
+ }  // namespace android
+@@ -80,7 +85,7 @@ BpActivityTaskManager::BpActivityTaskManager(const ::android::sp<::android::IBin
+   if (((_aidl_ret_status) != (::android::OK))) {
+     goto _aidl_error;
+   }
+-  _aidl_ret_status = remote()->transact(::android::IBinder::FIRST_CALL_TRANSACTION + 21 /* removeTask */, _aidl_data, &_aidl_reply);
++  _aidl_ret_status = remote()->transact(::android::IBinder::FIRST_CALL_TRANSACTION + 22 /* removeTask */, _aidl_data, &_aidl_reply);
+   if (((_aidl_ret_status) != (::android::OK))) {
+     goto _aidl_error;
+   }
+@@ -109,7 +114,7 @@ BpActivityTaskManager::BpActivityTaskManager(const ::android::sp<::android::IBin
+   if (((_aidl_ret_status) != (::android::OK))) {
+     goto _aidl_error;
+   }
+-  _aidl_ret_status = remote()->transact(::android::IBinder::FIRST_CALL_TRANSACTION + 22 /* removeAllVisibleRecentTasks */, _aidl_data, &_aidl_reply);
++  _aidl_ret_status = remote()->transact(::android::IBinder::FIRST_CALL_TRANSACTION + 23 /* removeAllVisibleRecentTasks */, _aidl_data, &_aidl_reply);
+   if (((_aidl_ret_status) != (::android::OK))) {
+     goto _aidl_error;
+   }
+@@ -125,6 +130,39 @@ BpActivityTaskManager::BpActivityTaskManager(const ::android::sp<::android::IBin
+   return _aidl_status;
+ }
+ 
++::android::binder::Status BpActivityTaskManager::resizeTask(int32_t taskId, int32_t left,
++        int32_t top, int32_t right, int32_t bottom, int32_t resizeMode) {
++  ::android::Parcel _aidl_data;
++  ::android::Parcel _aidl_reply;
++  ::android::status_t _aidl_ret_status = ::android::OK;
++  ::android::binder::Status _aidl_status;
++  _aidl_ret_status = _aidl_data.writeInterfaceToken(getInterfaceDescriptor());
++  if (((_aidl_ret_status) != (::android::OK))) goto _aidl_error;
++  _aidl_ret_status = _aidl_data.writeInt32(taskId);
++  if (((_aidl_ret_status) != (::android::OK))) goto _aidl_error;
++  // AIDL 'in Rect' writes a non-null marker followed by four ints.
++  _aidl_ret_status = _aidl_data.writeInt32(1);
++  if (((_aidl_ret_status) != (::android::OK))) goto _aidl_error;
++  _aidl_ret_status = _aidl_data.writeInt32(left);
++  if (((_aidl_ret_status) != (::android::OK))) goto _aidl_error;
++  _aidl_ret_status = _aidl_data.writeInt32(top);
++  if (((_aidl_ret_status) != (::android::OK))) goto _aidl_error;
++  _aidl_ret_status = _aidl_data.writeInt32(right);
++  if (((_aidl_ret_status) != (::android::OK))) goto _aidl_error;
++  _aidl_ret_status = _aidl_data.writeInt32(bottom);
++  if (((_aidl_ret_status) != (::android::OK))) goto _aidl_error;
++  _aidl_ret_status = _aidl_data.writeInt32(resizeMode);
++  if (((_aidl_ret_status) != (::android::OK))) goto _aidl_error;
++  _aidl_ret_status = remote()->transact(::android::IBinder::FIRST_CALL_TRANSACTION + 49 /* resizeTask */, _aidl_data, &_aidl_reply);
++  if (((_aidl_ret_status) != (::android::OK))) goto _aidl_error;
++  _aidl_ret_status = _aidl_status.readFromParcel(_aidl_reply);
++  if (((_aidl_ret_status) != (::android::OK))) goto _aidl_error;
++  if (!_aidl_status.isOk()) return _aidl_status;
++_aidl_error:
++  _aidl_status.setFromStatusT(_aidl_ret_status);
++  return _aidl_status;
++}
++
+ }  // namespace app
+ 
+ }  // namespace android
+@@ -159,7 +197,7 @@ namespace app {
+     }
+   }
+   break;
+-  case ::android::IBinder::FIRST_CALL_TRANSACTION + 21 /* removeTask */:
++  case ::android::IBinder::FIRST_CALL_TRANSACTION + 22 /* removeTask */:
+   {
+     int32_t in_taskId;
+     bool _aidl_return;
+@@ -185,7 +223,7 @@ namespace app {
+     }
+   }
+   break;
+-  case ::android::IBinder::FIRST_CALL_TRANSACTION + 22 /* removeAllVisibleRecentTasks */:
++  case ::android::IBinder::FIRST_CALL_TRANSACTION + 23 /* removeAllVisibleRecentTasks */:
+   {
+     if (!(_aidl_data.checkInterface(this))) {
+       _aidl_ret_status = ::android::BAD_TYPE;
+@@ -201,6 +239,44 @@ namespace app {
+     }
+   }
+   break;
++  case ::android::IBinder::FIRST_CALL_TRANSACTION + 49 /* resizeTask */:
++  {
++    int32_t in_taskId;
++    int32_t in_left;
++    int32_t in_top;
++    int32_t in_right;
++    int32_t in_bottom;
++    int32_t in_resizeMode;
++    if (!(_aidl_data.checkInterface(this))) {
++      _aidl_ret_status = ::android::BAD_TYPE;
++      break;
++    }
++    _aidl_ret_status = _aidl_data.readInt32(&in_taskId);
++    if (((_aidl_ret_status) != (::android::OK))) break;
++    int32_t in_bounds_present;
++    _aidl_ret_status = _aidl_data.readInt32(&in_bounds_present);
++    if (((_aidl_ret_status) != (::android::OK))) break;
++    if (in_bounds_present == 0) {
++      _aidl_ret_status = ::android::UNEXPECTED_NULL;
++      break;
++    }
++    _aidl_ret_status = _aidl_data.readInt32(&in_left);
++    if (((_aidl_ret_status) != (::android::OK))) break;
++    _aidl_ret_status = _aidl_data.readInt32(&in_top);
++    if (((_aidl_ret_status) != (::android::OK))) break;
++    _aidl_ret_status = _aidl_data.readInt32(&in_right);
++    if (((_aidl_ret_status) != (::android::OK))) break;
++    _aidl_ret_status = _aidl_data.readInt32(&in_bottom);
++    if (((_aidl_ret_status) != (::android::OK))) break;
++    _aidl_ret_status = _aidl_data.readInt32(&in_resizeMode);
++    if (((_aidl_ret_status) != (::android::OK))) break;
++    ::android::binder::Status _aidl_status(resizeTask(in_taskId, in_left, in_top,
++        in_right, in_bottom, in_resizeMode));
++    _aidl_ret_status = _aidl_status.writeToParcel(_aidl_reply);
++    if (((_aidl_ret_status) != (::android::OK))) break;
++    if (!_aidl_status.isOk()) break;
++  }
++  break;
+   default:
+   {
+     _aidl_ret_status = ::android::BBinder::onTransact(_aidl_code, _aidl_data, _aidl_reply, _aidl_flags);
+diff --git a/interfaces/task/1.0/default/binder-interfaces/include/android/app/BpActivityTaskManager.h b/interfaces/task/1.0/default/binder-interfaces/include/android/app/BpActivityTaskManager.h
+index 016e6b9..e091b47 100644
+--- a/interfaces/task/1.0/default/binder-interfaces/include/android/app/BpActivityTaskManager.h
++++ b/interfaces/task/1.0/default/binder-interfaces/include/android/app/BpActivityTaskManager.h
+@@ -17,6 +17,8 @@ public:
+   ::android::binder::Status setFocusedTask(int32_t taskId) override;
+   ::android::binder::Status removeTask(int32_t taskId, bool* _aidl_return) override;
+   ::android::binder::Status removeAllVisibleRecentTasks() override;
++  ::android::binder::Status resizeTask(int32_t taskId, int32_t left, int32_t top,
++      int32_t right, int32_t bottom, int32_t resizeMode) override;
+ };  // class BpActivityTaskManager
+ 
+ }  // namespace app
+diff --git a/interfaces/task/1.0/default/binder-interfaces/include/android/app/IActivityTaskManager.h b/interfaces/task/1.0/default/binder-interfaces/include/android/app/IActivityTaskManager.h
+index ddaac5c..28204a2 100644
+--- a/interfaces/task/1.0/default/binder-interfaces/include/android/app/IActivityTaskManager.h
++++ b/interfaces/task/1.0/default/binder-interfaces/include/android/app/IActivityTaskManager.h
+@@ -17,6 +17,8 @@ public:
+   virtual ::android::binder::Status setFocusedTask(int32_t taskId) = 0;
+   virtual ::android::binder::Status removeTask(int32_t taskId, bool* _aidl_return) = 0;
+   virtual ::android::binder::Status removeAllVisibleRecentTasks() = 0;
++  virtual ::android::binder::Status resizeTask(int32_t taskId, int32_t left,
++      int32_t top, int32_t right, int32_t bottom, int32_t resizeMode) = 0;
+ };  // class IActivityTaskManager
+ 
+ class IActivityTaskManagerDefault : public IActivityTaskManager {
+@@ -25,6 +27,8 @@ public:
+   ::android::binder::Status setFocusedTask(int32_t taskId) override;
+   ::android::binder::Status removeTask(int32_t taskId, bool* _aidl_return) override;
+   ::android::binder::Status removeAllVisibleRecentTasks() override;
++  ::android::binder::Status resizeTask(int32_t taskId, int32_t left, int32_t top,
++      int32_t right, int32_t bottom, int32_t resizeMode) override;
+ 
+ };
+ 
+diff --git a/interfaces/window/1.3/Android.bp b/interfaces/window/1.3/Android.bp
+new file mode 100644
+index 0000000..d77e745
+--- /dev/null
++++ b/interfaces/window/1.3/Android.bp
+@@ -0,0 +1,19 @@
++// This file is autogenerated by hidl-gen -Landroidbp.
++
++hidl_interface {
++    name: "vendor.waydroid.window@1.3",
++    root: "vendor.waydroid",
++    system_ext_specific: true,
++    srcs: [
++        "types.hal",
++        "IWaydroidWindow.hal",
++        "IWaydroidWindowCallback.hal",
++    ],
++    interfaces: [
++        "android.hidl.base@1.0",
++        "vendor.waydroid.window@1.0",
++        "vendor.waydroid.window@1.1",
++        "vendor.waydroid.window@1.2",
++    ],
++    gen_java: true,
++}
+diff --git a/interfaces/window/1.3/IWaydroidWindow.hal b/interfaces/window/1.3/IWaydroidWindow.hal
+new file mode 100644
+index 0000000..f57a979
+--- /dev/null
++++ b/interfaces/window/1.3/IWaydroidWindow.hal
+@@ -0,0 +1,31 @@
++/*
++ * Copyright (C) 2026 The Waydroid Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ */
++package vendor.waydroid.window@1.3;
++
++import @1.2::IWaydroidWindow;
++import IWaydroidWindowCallback;
++
++interface IWaydroidWindow extends @1.2::IWaydroidWindow {
++    registerTaskWindowCallback(IWaydroidWindowCallback callback)
++            generates (bool registered);
++
++    // Start the xdg-shell grab selected by AOSP WM Shell.
++    beginTaskWindowDrag(uint32_t taskID,
++            bitfield<TaskWindowDragEdge> edges) generates (bool accepted);
++
++    // Framework-authenticated per-task routing and desktop metadata.
++    setTaskWindowRoute(uint32_t taskID, bool enabled, int32_t displayID,
++            string component, string title, string appID)
++            generates (bool accepted);
++
++    setTaskWindowState(uint32_t taskID, TaskWindowState state,
++            TaskWindowBounds restoreBounds, TaskWindowStateSource source,
++            uint64_t generation) generates (bool accepted);
++};
+diff --git a/interfaces/window/1.3/IWaydroidWindowCallback.hal b/interfaces/window/1.3/IWaydroidWindowCallback.hal
+new file mode 100644
+index 0000000..bd0f654
+--- /dev/null
++++ b/interfaces/window/1.3/IWaydroidWindowCallback.hal
+@@ -0,0 +1,22 @@
++/*
++ * Copyright (C) 2026 The Waydroid Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ */
++package vendor.waydroid.window@1.3;
++
++interface IWaydroidWindowCallback {
++    /** Apply host configure bounds through WM Shell's interactive task path. */
++    oneway requestTaskWindowBounds(uint32_t taskID, TaskWindowBounds bounds,
++            bool dragResizing, uint64_t generation);
++
++    oneway requestTaskWindowState(uint32_t taskID, TaskWindowState state,
++            TaskWindowBounds bounds, uint64_t generation);
++
++    /** taskID 0 asks the framework to republish every running desktop task. */
++    oneway queryTaskWindowState(uint32_t taskID);
++};
+diff --git a/interfaces/window/1.3/types.hal b/interfaces/window/1.3/types.hal
+new file mode 100644
+index 0000000..cb20bbc
+--- /dev/null
++++ b/interfaces/window/1.3/types.hal
+@@ -0,0 +1,40 @@
++/*
++ * Copyright (C) 2026 The Waydroid Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ */
++package vendor.waydroid.window@1.3;
++
++enum TaskWindowState : uint32_t {
++    NORMAL = 0,
++    MAXIMIZED = 1,
++    MINIMIZED = 2,
++    FULL_UI = 3,
++};
++
++enum TaskWindowStateSource : uint32_t {
++    ANDROID_FRAMEWORK = 0,
++    HOST = 1,
++    RECONCILE = 2,
++};
++
++// Matches DragPositioningCallback.CtrlType exactly.  NONE means move;
++// the remaining values are combinable resize edges.
++enum TaskWindowDragEdge : uint32_t {
++    NONE = 0,
++    LEFT = 1,
++    RIGHT = 2,
++    TOP = 4,
++    BOTTOM = 8,
++};
++
++struct TaskWindowBounds {
++    int32_t left;
++    int32_t top;
++    int32_t right;
++    int32_t bottom;
++};
+-- 
+2.43.0
+

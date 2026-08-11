@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Mon, 10 Aug 2026 00:00:02 +0000
+Subject: [PATCH] mesa3d: prefer the host Python for Meson
+
+---
+diff --git a/android/mesa3d_cross.mk b/android/mesa3d_cross.mk
+index e5d9a26..7ec0386 100644
+--- a/android/mesa3d_cross.mk
++++ b/android/mesa3d_cross.mk
+@@ -87,7 +87,7 @@ MESA3D_GLES_BINS += \
+ endif
+ 
+ MESON_GEN_NINJA := \
+-	cd $(MESON_OUT_DIR) && PATH=~/.cargo/bin:/usr/bin:/usr/local/bin:$$PATH meson ./build     \
++	cd $(MESON_OUT_DIR) && PATH=/usr/bin:/bin:/usr/local/bin:$$PATH meson ./build     \
+ 	--cross-file $(call relative-to-absolute,$(MESON_GEN_DIR))/aosp_cross        \
+ 	--buildtype=release                                                          \
+ 	-Dplatforms=android                                                          \

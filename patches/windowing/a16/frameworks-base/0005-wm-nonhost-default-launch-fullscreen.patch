@@ -1,0 +1,105 @@
+From 6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Wed, 12 Aug 2026 01:20:00 +0000
+Subject: [PATCH] wm: keep non-host default-display launches fullscreen
+
+While host-routed desktop tasks are active, the default display's "Desk"
+root is in freeform mode, so an Android-internal launch (no trusted host
+cookie) was being created freeform on the desk instead of staying fullscreen.
+This broke the three-entry coexistence contract: Avium Launcher / Android
+internal launches must keep AviumUI's default fullscreen even while Linux
+host windows are open.
+
+updateWaydroidHostWindowRoute now owns the full route policy for the default
+display:
+
+- trusted host launches (and same-task navigation into a host task) stay
+  freeform on the desk;
+- every other default-display launch is taken out of the freeform desk root,
+  reparented to the task display area and forced to fullscreen;
+- non-default displays (Avium/MiFreeform) are never touched.
+
+diff --git a/services/core/java/com/android/server/wm/ActivityStarter.java b/services/core/java/com/android/server/wm/ActivityStarter.java
+index c4437d316415fd81bc882648fd6bba06edbb8631..3f4a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6 100644
+--- a/services/core/java/com/android/server/wm/ActivityStarter.java
++++ b/services/core/java/com/android/server/wm/ActivityStarter.java
+@@ -34,5 +34,6 @@ import static android.app.ActivityTaskManager.INVALID_TASK_ID;
+ import static android.app.PendingIntent.FLAG_CANCEL_CURRENT;
+ import static android.app.PendingIntent.FLAG_ONE_SHOT;
++import static android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM;
+ import static android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN;
+ import static android.app.WindowConfiguration.WINDOWING_MODE_PINNED;
+ import static android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED;
+@@ -1969,14 +1969,37 @@ private void updateWaydroidHostWindowRoute(ActivityRecord started) {
+         final boolean trustedHostLaunch = hasTrustedWaydroidHostWindowCookie();
+-        final boolean routeToHostWindow = task.getDisplayId() == DEFAULT_DISPLAY
++        final boolean defaultDisplay = task.getDisplayId() == DEFAULT_DISPLAY;
++        final boolean routeToHostWindow = defaultDisplay
+                 && (trustedHostLaunch
+                     || (sameTaskNavigation && task.isWaydroidHostWindow()));
+         final boolean wasHostWindow = task.isWaydroidHostWindow();
+         task.setWaydroidHostWindow(routeToHostWindow);
+ 
+-        // A default-display launch from another Android task owns the normal fullscreen route.
+-        // Do not touch non-default displays: Avium/MiFreeform owns their windowing policy.
+-        if (wasHostWindow && !routeToHostWindow && !sameTaskNavigation
+-                && task.getDisplayId() == DEFAULT_DISPLAY && task.inFreeformWindowingMode()) {
++        // Do not touch non-default displays: Avium/MiFreeform owns their windowing policy.
++        if (!defaultDisplay) {
++            return;
++        }
++
++        if (routeToHostWindow) {
++            if (!task.inFreeformWindowingMode()) {
++                task.setWindowingMode(WINDOWING_MODE_FREEFORM);
++            }
++            return;
++        }
++
++        // A default-display launch from Android (no trusted host cookie) owns the normal
++        // fullscreen route, even while host-routed desktop tasks are active on the same
++        // display. Move the task out of the Waydroid desk root so AviumUI's default
++        // full-screen experience coexists with Linux host windows.
++        if (sameTaskNavigation && !wasHostWindow) {
++            return;
++        }
++        final TaskDisplayArea taskDisplayArea = task.getDisplayArea();
++        if (taskDisplayArea != null && !task.inFullscreenWindowingMode()) {
++            final Task rootTask = task.getRootTask();
++            if (rootTask != null && rootTask != task
++                    && rootTask.inFreeformWindowingMode()) {
++                task.reparent(taskDisplayArea, true /* onTop */);
++            }
+             task.setWindowingMode(WINDOWING_MODE_FULLSCREEN);
+         }
+     }
+diff --git a/services/tests/wmtests/src/com/android/server/wm/ActivityStarterTests.java b/services/tests/wmtests/src/com/android/server/wm/ActivityStarterTests.java
+index 62f8b740d212924932cd967ed220bea9defab798..7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b 100644
+--- a/services/tests/wmtests/src/com/android/server/wm/ActivityStarterTests.java
++++ b/services/tests/wmtests/src/com/android/server/wm/ActivityStarterTests.java
+@@ -1690,7 +1690,25 @@ public class ActivityStarterTests extends WindowTestsBase {
+         assertTrue(mRootWindowContainer.topRunningActivity().mLaunchCookie == cookie);
+         assertFalse(mRootWindowContainer.topRunningActivity().getTask()
+                 .isWaydroidHostWindow());
+     }
++
++    @Test
++    public void testWaydroidHostWindowRoute_nonHostDefaultLaunchStaysFullscreen() {
++        final ActivityStarter starter = prepareStarter(FLAG_ACTIVITY_NEW_TASK, false);
++        new ActivityBuilder(mAtm).setCreateTask(true).build();
++        final Intent intent = new Intent();
++        intent.setComponent(ActivityBuilder.getDefaultComponent());
++
++        starter.setReason("testWaydroidHostWindowRoute_nonHostDefaultLaunchStaysFullscreen")
++                .setIntent(intent)
++                .setCallingUid(DEFAULT_FAKE_UID)
++                .execute();
++
++        assertFalse(mRootWindowContainer.topRunningActivity().getTask()
++                .isWaydroidHostWindow());
++        assertEquals(WINDOWING_MODE_FULLSCREEN,
++                mRootWindowContainer.topRunningActivity().getTask().getWindowingMode());
++    }
+ 
+     @Test
+     public void testRemoteAnimation_appliesToExistingTask() {

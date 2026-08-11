@@ -1,0 +1,29 @@
+From 088e43684ea493c31dcee77af330017f188fd63b Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Tue, 11 Aug 2026 12:41:47 +0000
+Subject: [PATCH] logd: fail soft when background scheduling policy is
+ unavailable
+
+Change-Id: Id214730e5ab5629ff99fb22ef87b101367d120e4
+---
+ logd/main.cpp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/logd/main.cpp b/logd/main.cpp
+index e6740b0d..4b8fe020 100644
+--- a/logd/main.cpp
++++ b/logd/main.cpp
+@@ -75,7 +75,9 @@ using android::base::SetProperty;
+ // handle the user, groups, capabilities, files, etc setup.
+ static void DropPrivs(bool klogd, bool auditd) {
+     if (set_sched_policy(0, SP_BACKGROUND) < 0) {
+-        PLOG(FATAL) << "failed to set background scheduling policy";
++        // Waydroid containers do not expose the cgroup scheduler knobs that
++        // set_sched_policy expects; keep logd running instead of aborting.
++        PLOG(ERROR) << "failed to set background scheduling policy; continuing";
+     }
+ 
+     if (!GetBoolProperty("ro.debuggable", false)) {
+-- 
+2.43.0
+

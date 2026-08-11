@@ -1,0 +1,79 @@
+From 3e05893e2664c6cba26ca4a881ae20a60c2eb227 Mon Sep 17 00:00:00 2001
+From: xinyang <xinyang@localhost>
+Date: Fri, 7 Aug 2026 00:30:25 +0000
+Subject: [PATCH] =?UTF-8?q?=E5=AE=B9=E5=99=A8=E4=B8=AD=E5=B0=86=20sysfs=20?=
+ =?UTF-8?q?=E9=98=9F=E5=88=97=E8=B0=83=E4=BC=98=E9=99=8D=E7=BA=A7=E4=B8=BA?=
+ =?UTF-8?q?=E5=8F=AF=E9=80=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Change-Id: I960f26b3ebc8b1730a1d99024b93aee0570c285f
+---
+ apexd/apexd_loop.cpp | 22 +++++++++++++++++-----
+ 1 file changed, 17 insertions(+), 5 deletions(-)
+
+diff --git a/apexd/apexd_loop.cpp b/apexd/apexd_loop.cpp
+index 1e08ad3f..c36132de 100644
+--- a/apexd/apexd_loop.cpp
++++ b/apexd/apexd_loop.cpp
+@@ -84,7 +84,11 @@ static void OpenSysfsMount() {
+   int fsfd;
+ 
+   if ((fsfd = syscall(__NR_fsopen, "sysfs", FSOPEN_CLOEXEC)) == -1) {
+-    PLOG(FATAL) << "Failed to create sysfs mount context";
++    // Waydroid cannot create a writable sysfs mount; use the host's
++    // existing read-only tree and treat queue tuning as best-effort.
++    sysfs_mntfd = open("/sys", O_RDONLY | O_CLOEXEC | O_DIRECTORY);
++    if (sysfs_mntfd != -1) return;
++    PLOG(FATAL) << "Failed to open the existing sysfs mount";
+   }
+ 
+   syscall(__NR_fsconfig, fsfd, FSCONFIG_CMD_CREATE, NULL, NULL, 0);
+@@ -122,7 +126,9 @@ Result<void> ConfigureScheduler(const std::string& device_path) {
+       StringPrintf("block/%s/queue/scheduler", device_name.c_str());
+   unique_fd sysfs_fd(openat(sysfs_mntfd, sysfs_path.c_str(), O_RDWR | O_CLOEXEC));
+   if (sysfs_fd.get() == -1) {
+-    return ErrnoError() << "Failed to open " << "/sys/" << sysfs_path;
++    PLOG(WARNING) << "Skipping scheduler configuration for /sys/"
++                  << sysfs_path;
++    return {};
+   }
+ 
+   // Kernels before v4.1 only support 'noop'. Kernels [v4.1, v5.0) support
+@@ -148,7 +154,9 @@ Result<void> ConfigureScheduler(const std::string& device_path) {
+   }
+ 
+   if (ret <= 0) {
+-    return ErrnoError() << "Failed to write to " << "/sys/" << sysfs_path;
++    PLOG(WARNING) << "Skipping scheduler configuration for /sys/"
++                  << sysfs_path;
++    return {};
+   }
+ 
+   return {};
+@@ -327,7 +335,9 @@ Result<void> ConfigureReadAhead(const std::string& device_path) {
+       StringPrintf("block/%s/queue/read_ahead_kb", device_name.c_str());
+   unique_fd sysfs_fd(openat(sysfs_mntfd, sysfs_device.c_str(), O_RDWR | O_CLOEXEC));
+   if (sysfs_fd.get() == -1) {
+-    return ErrnoError() << "Failed to open " << "/sys/" << sysfs_device;
++    PLOG(WARNING) << "Skipping read-ahead configuration for /sys/"
++                  << sysfs_device;
++    return {};
+   }
+ 
+   std::string readAheadKb = std::to_string(
+@@ -336,7 +346,9 @@ Result<void> ConfigureReadAhead(const std::string& device_path) {
+   int ret = TEMP_FAILURE_RETRY(
+       write(sysfs_fd.get(), readAheadKb.c_str(), readAheadKb.length()));
+   if (ret < 0) {
+-    return ErrnoError() << "Failed to write to " << sysfs_device;
++    PLOG(WARNING) << "Skipping read-ahead configuration for /sys/"
++                  << sysfs_device;
++    return {};
+   }
+ 
+   return {};
+-- 
+2.43.0
+

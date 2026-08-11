@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Mon, 10 Aug 2026 00:00:03 +0000
+Subject: [PATCH] minigbm: include unistd for file descriptor APIs
+
+---
+diff --git a/cros_gralloc/gralloc4/CrosGralloc4Mapper.cc b/cros_gralloc/gralloc4/CrosGralloc4Mapper.cc
+index a1a5ccb..82f1705 100644
+--- a/cros_gralloc/gralloc4/CrosGralloc4Mapper.cc
++++ b/cros_gralloc/gralloc4/CrosGralloc4Mapper.cc
+@@ -13,6 +13,7 @@
+ #include <aidl/android/hardware/graphics/common/Rect.h>
+ #include <aidl/android/hardware/graphics/common/Smpte2086.h>
+ 
++#include <unistd.h>
+ #include <cutils/native_handle.h>
+ #include <cutils/properties.h>
+ #include <gralloctypes/Gralloc4.h>
+diff --git a/cros_gralloc/mapper_stablec/Mapper.cpp b/cros_gralloc/mapper_stablec/Mapper.cpp
+index ad4258d..85f00e2 100644
+--- a/cros_gralloc/mapper_stablec/Mapper.cpp
++++ b/cros_gralloc/mapper_stablec/Mapper.cpp
+@@ -12,6 +12,7 @@
+ #include <android/hardware/graphics/mapper/IMapper.h>
+ #include <android/hardware/graphics/mapper/utils/IMapperMetadataTypes.h>
+ #include <android/hardware/graphics/mapper/utils/IMapperProvider.h>
++#include <unistd.h>
+ #include <cutils/native_handle.h>
+ #include <gralloctypes/Gralloc4.h>
+ 

@@ -1,0 +1,41 @@
+From ad5bfe1d3586a5d16840123b431616f8a080adae Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Tue, 11 Aug 2026 04:19:11 +0000
+Subject: [PATCH] bluetooth-fail-soft-when-service-missing
+
+Change-Id: I14f8ec211106aed449ab5898062121382bfc87b7
+---
+ service/src/BluetoothComponent.kt | 16 ++++++++++------
+ 1 file changed, 10 insertions(+), 6 deletions(-)
+
+diff --git a/service/src/BluetoothComponent.kt b/service/src/BluetoothComponent.kt
+index 7cf3841cee..66b03bfa5a 100644
+--- a/service/src/BluetoothComponent.kt
++++ b/service/src/BluetoothComponent.kt
+@@ -51,13 +51,17 @@ class BluetoothComponent(context: Context) {
+ 
+         val result = pm.resolveService(intent, PackageManager.MATCH_SYSTEM_ONLY)
+         if (result == null) {
+-            throw IllegalStateException("No service can handle intent $intent")
++            // Waydroid ships no Bluetooth app/HAL, so resolveService returns null.
++            // Fail soft instead of crashing system_server at boot.
++            Log.w(TAG, "No Bluetooth adapter service found for $intent")
++            packageName = "com.android.bluetooth"
++            componentName = ComponentName(packageName, "com.android.bluetooth.NoBluetooth")
++        } else {
++            val serviceInfo = result.serviceInfo
++            packageName = serviceInfo.packageName
++            componentName = ComponentName(serviceInfo.packageName, serviceInfo.name)
++            Log.i(TAG, "Found Bluetooth component: $componentName")
+         }
+-
+-        val serviceInfo = result.serviceInfo
+-        packageName = serviceInfo.packageName
+-        componentName = ComponentName(serviceInfo.packageName, serviceInfo.name)
+-        Log.i(TAG, "Found Bluetooth component: $componentName")
+     }
+ 
+     companion object {
+-- 
+2.43.0
+

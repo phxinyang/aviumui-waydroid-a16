@@ -1,6 +1,6 @@
 # AOSP/LineageOS 16 构建环境(Ubuntu 24.04)
 # 用 docker 隔离,不碰宿主 Arch 系统。
-FROM ubuntu:24.04
+FROM ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
@@ -37,6 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     openjdk-17-jdk \
     pngcrush \
     python3 \
+    python3.12 \
     python3-pip \
     python3-requests \
     rsync \
@@ -67,8 +68,10 @@ RUN git config --global user.email "build@avium.local" \
  && git config --global user.name "Avium Build"
 
 # repo 工具
-RUN curl -sSL https://storage.googleapis.com/git-repo-downloads/repo \
+RUN curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo \
         -o /usr/local/bin/repo \
+    && echo "1211b57b57e4122a9c546295a59b37d24068f1164d0e87bef096d5323c413e4f  /usr/local/bin/repo" \
+        | sha256sum -c - \
     && chmod +x /usr/local/bin/repo
 
 # 构建工作区

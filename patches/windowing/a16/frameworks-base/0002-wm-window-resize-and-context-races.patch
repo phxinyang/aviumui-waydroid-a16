@@ -1,0 +1,71 @@
+From 934ab64fdf592d06bffe301fd21d0ad378751d1e Mon Sep 17 00:00:00 2001
+From: Avium Window Reproducer <avium-window-reproducer@example.invalid>
+Date: Tue, 11 Aug 2026 01:11:00 +0800
+Subject: [PATCH] wm: fix host resize crop and window context race
+
+Change-Id: I8bc710e818eaa2d861ff199283b4ac16085a44b8
+---
+ core/java/android/view/ViewRootImpl.java      | 26 ++++++++++++-------
+ .../server/wm/WindowManagerService.java       | 11 +++++---
+ 2 files changed, 24 insertions(+), 13 deletions(-)
+
+diff --git a/core/java/android/view/ViewRootImpl.java b/core/java/android/view/ViewRootImpl.java
+index 31ff47f975d6..6f0510ca4290 100644
+--- a/core/java/android/view/ViewRootImpl.java
++++ b/core/java/android/view/ViewRootImpl.java
+@@ -9790,16 +9790,24 @@ public final class ViewRootImpl implements ViewParent,
+         if (mSurfaceControl.isValid()) {
+             if (mPendingDragResizing && !mSurfaceSize.equals(
+                     mWinFrameInScreen.width(), mWinFrameInScreen.height())) {
+-                // During drag-resize, a single fullscreen-sized surface is reused for optimization.
+-                // Crop to the content size instead of the surface size to avoid exposing garbage
+-                // content that is still on the surface from previous re-layouts (e.g. when
+-                // resizing to a larger size).
++                // The crop is in surface coordinates. Elevated freeform windows allocate a
++                // surface larger than the frame, so retain both sides of the shadow insets.
++                final Rect surfaceInsets = mWindowAttributes.surfaceInsets;
+                 mTransaction.setWindowCrop(mSurfaceControl,
+-                        mWinFrameInScreen.width(), mWinFrameInScreen.height());
+-            } else if (!HardwareRenderer.isDrawingEnabled()) {
+-                // When drawing is disabled the window layer won't have a valid buffer.
+-                // Set a window crop so input can get delivered to the window.
+-                mTransaction.setWindowCrop(mSurfaceControl, mSurfaceSize.x, mSurfaceSize.y).apply();
++                        mWinFrameInScreen.width() + surfaceInsets.left + surfaceInsets.right,
++                        mWinFrameInScreen.height() + surfaceInsets.top + surfaceInsets.bottom);
++            } else {
++                if (mDragResizing) {
++                    // A client crop is persistent SurfaceControl state. Remove the temporary
++                    // drag-resize crop before committing the END frame.
++                    mTransaction.setCrop(mSurfaceControl, null);
++                }
++                if (!HardwareRenderer.isDrawingEnabled()) {
++                    // When drawing is disabled the window layer won't have a valid buffer.
++                    // Set a window crop so input can get delivered to the window.
++                    mTransaction.setWindowCrop(
++                            mSurfaceControl, mSurfaceSize.x, mSurfaceSize.y).apply();
++                }
+             }
+         }
+ 
+diff --git a/services/core/java/com/android/server/wm/WindowManagerService.java b/services/core/java/com/android/server/wm/WindowManagerService.java
+index 329a7d47b292..5918b73894f6 100644
+--- a/services/core/java/com/android/server/wm/WindowManagerService.java
++++ b/services/core/java/com/android/server/wm/WindowManagerService.java
+@@ -3164,10 +3164,13 @@ public class WindowManagerService extends IWindowManager.Stub
+                 // registration in DisplayContent#onParentChanged at DisplayContent initialization.
+                 final DisplayContent dc = mRoot.getDisplayContent(displayId);
+                 if (dc == null) {
+-                    ProtoLog.w(WM_ERROR,
+-                            "attachWindowContextToDisplayContent: "
+-                                    + "trying to attach to a non-existing display:%d",
+-                            displayId);
++                    if (callingPid != MY_PID) {
++                        throw new IllegalArgumentException(
++                                "attachWindowContextToDisplayContent: trying to attach to a"
++                                        + " non-existing display:" + displayId);
++                    }
++                    // Early return if this method is invoked from system process.
++                    // See above comments for more detail.
+                     return null;
+                 }
+                 mWindowContextListenerController.registerWindowContainerListener(wpc, clientToken,

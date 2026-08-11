@@ -1,0 +1,35 @@
+From 963b75d1ec86b8a032f13ece9a6985dba54dcbff Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Tue, 11 Aug 2026 04:19:10 +0000
+Subject: [PATCH] build-make-drop-care-map-proto
+
+Change-Id: I5caa31c384eb71e0c9ccc3deb4de63fc959b8872
+---
+ tools/releasetools/Android.bp | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tools/releasetools/Android.bp b/tools/releasetools/Android.bp
+index d5325710f6..fc117ee0e4 100644
+--- a/tools/releasetools/Android.bp
++++ b/tools/releasetools/Android.bp
+@@ -163,7 +163,7 @@ python_defaults {
+         "releasetools_common",
+         "releasetools_verity_utils",
+         "apex_manifest",
+-        "care_map_proto_py",
++        // "care_map_proto_py",  // proto lives in removed bootable/recovery
+         "ota_utils_lib",
+     ],
+     required: [
+@@ -340,7 +340,7 @@ python_binary_host {
+     libs: [
+         "ota_metadata_proto",
+         "update_payload",
+-        "care_map_proto_py",
++        // "care_map_proto_py",  // proto lives in removed bootable/recovery
+         "releasetools_common",
+         "ota_utils_lib",
+     ],
+-- 
+2.43.0
+

@@ -1,0 +1,33 @@
+From 8ee307533fc865cfa1c4b1776834f0c9b8a3f2fb Mon Sep 17 00:00:00 2001
+From: xinyang <xinyang@localhost>
+Date: Fri, 7 Aug 2026 02:10:02 +0000
+Subject: [PATCH] =?UTF-8?q?=E5=AF=BC=E5=87=BA=20Waydroid=20=E9=80=9A?=
+ =?UTF-8?q?=E7=9F=A5=E8=B5=84=E6=BA=90=E7=AC=A6=E5=8F=B7?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+此前只恢复资源文件，symbols.xml 未导出名称，导致 R.java 缺符号。显式导出三项资源，保证资源重建后 WayDroidService 可编译。
+
+Change-Id: Ie96780e0682de8a3ef20cc4adbcc1111aa31ed98
+---
+ lineage/res/res/values/symbols.xml | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/lineage/res/res/values/symbols.xml b/lineage/res/res/values/symbols.xml
+index a661b33d..74de7e29 100644
+--- a/lineage/res/res/values/symbols.xml
++++ b/lineage/res/res/values/symbols.xml
+@@ -191,6 +191,9 @@
+     <java-symbol type="bool" name="config_enableAdvancedRotationSettings" />
+ 
+      <!-- Waydroid -->
++     <java-symbol type="string" name="trust_notification_channel" />
++     <java-symbol type="color" name="color_error" />
++     <java-symbol type="drawable" name="ic_warning" />
+      <java-symbol type="string" name="broken_waydroid_integration_title" />
+      <java-symbol type="string" name="broken_waydroid_integration_msg" />
+      <java-symbol type="string" name="broken_waydroid_integration_url" />
+-- 
+2.43.0
+

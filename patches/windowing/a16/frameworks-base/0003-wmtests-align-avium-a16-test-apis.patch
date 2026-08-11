@@ -1,0 +1,246 @@
+From a1f140bbe4ccfc61c3c1d1cd032031e793b714d9 Mon Sep 17 00:00:00 2001
+From: xinyang <xinyang@localhost>
+Date: Mon, 10 Aug 2026 19:31:50 +0000
+Subject: [PATCH 1/2] wmtests: align Avium A16 test APIs
+
+Change-Id: Ie4af3d350c4471dd80d26960838afa0526a6d73a
+---
+ .../server/policy/KeyGestureEventTests.java   | 26 +++++++------------
+ .../server/policy/TestPhoneWindowManager.java | 20 +++++++++++---
+ .../server/wm/ActivityRecordTests.java        |  3 ++-
+ ...StateAutoRotateSettingControllerTests.java |  6 ++---
+ .../android/server/wm/InsetsPolicyTest.java   | 18 ++++++++-----
+ .../com/android/server/wm/RootTaskTests.java  |  2 +-
+ 6 files changed, 43 insertions(+), 32 deletions(-)
+
+diff --git a/services/tests/wmtests/src/com/android/server/policy/KeyGestureEventTests.java b/services/tests/wmtests/src/com/android/server/policy/KeyGestureEventTests.java
+index d71d54bbef14..53ee86de60f5 100644
+--- a/services/tests/wmtests/src/com/android/server/policy/KeyGestureEventTests.java
++++ b/services/tests/wmtests/src/com/android/server/policy/KeyGestureEventTests.java
+@@ -24,11 +24,6 @@ import static android.view.KeyEvent.KEYCODE_M;
+ import static android.view.KeyEvent.KEYCODE_P;
+ import static android.view.KeyEvent.KEYCODE_U;
+ 
+-import static com.android.server.policy.PhoneWindowManager.DOUBLE_TAP_HOME_RECENT_SYSTEM_UI;
+-import static com.android.server.policy.PhoneWindowManager.LONG_PRESS_HOME_ALL_APPS;
+-import static com.android.server.policy.PhoneWindowManager.LONG_PRESS_HOME_ASSIST;
+-import static com.android.server.policy.PhoneWindowManager.LONG_PRESS_HOME_NOTIFICATION_PANEL;
+-
+ import android.app.role.RoleManager;
+ import android.content.ComponentName;
+ import android.content.Intent;
+@@ -50,6 +45,7 @@ import junitparams.Parameters;
+ import org.junit.Before;
+ import org.junit.Test;
+ import org.junit.runner.RunWith;
++import org.lineageos.internal.util.DeviceKeysConstants.Action;
+ 
+ @Presubmit
+ @MediumTest
+@@ -136,20 +132,16 @@ public class KeyGestureEventTests extends ShortcutKeyTestBase {
+ 
+     @Keep
+     private static Object[][] longPressOnHomeTestArguments() {
+-        // testName, testKeys, longPressOnHomeBehavior, expectedKeyGestureType, expectedKey,
++        // testName, testKeys, longPressOnHomeAction, expectedKeyGestureType, expectedKey,
+         // expectedModifierState
+         return new Object[][]{
+-                {"Long press HOME key -> Toggle Notification panel",
+-                        new int[]{KeyEvent.KEYCODE_HOME}, LONG_PRESS_HOME_NOTIFICATION_PANEL,
+-                        KeyGestureEvent.KEY_GESTURE_TYPE_TOGGLE_NOTIFICATION_PANEL,
+-                        KeyEvent.KEYCODE_HOME, 0},
+                 {"Long press HOME key -> Launch assistant",
+-                        new int[]{KeyEvent.KEYCODE_HOME}, LONG_PRESS_HOME_ASSIST,
++                        new int[]{KeyEvent.KEYCODE_HOME}, Action.SEARCH,
+                         KeyGestureEvent.KEY_GESTURE_TYPE_LAUNCH_ASSISTANT,
+                         KeyEvent.KEYCODE_HOME, 0},
+-                {"Long press HOME key -> Open App Drawer",
+-                        new int[]{KeyEvent.KEYCODE_HOME}, LONG_PRESS_HOME_ALL_APPS,
+-                        KeyGestureEvent.KEY_GESTURE_TYPE_ALL_APPS,
++                {"Long press HOME key -> Open App switcher",
++                        new int[]{KeyEvent.KEYCODE_HOME}, Action.APP_SWITCH,
++                        KeyGestureEvent.KEY_GESTURE_TYPE_APP_SWITCH,
+                         KeyEvent.KEYCODE_HOME, 0}};
+     }
+ 
+@@ -178,10 +170,10 @@ public class KeyGestureEventTests extends ShortcutKeyTestBase {
+ 
+     @Test
+     @Parameters(method = "longPressOnHomeTestArguments")
+-    public void testLongPressOnHome(String testName, int[] testKeys, int longPressOnHomeBehavior,
++    public void testLongPressOnHome(String testName, int[] testKeys, Action longPressOnHomeAction,
+             @KeyGestureEvent.KeyGestureType int expectedKeyGestureType, int expectedKey,
+             int expectedModifierState) {
+-        mPhoneWindowManager.overrideLongPressOnHomeBehavior(longPressOnHomeBehavior);
++        mPhoneWindowManager.overrideLongPressOnHomeAction(longPressOnHomeAction);
+         sendLongPressKeyCombination(testKeys);
+         mPhoneWindowManager.assertKeyGestureCompleted(
+                 new int[]{expectedKey}, expectedModifierState, expectedKeyGestureType,
+@@ -190,7 +182,7 @@ public class KeyGestureEventTests extends ShortcutKeyTestBase {
+ 
+     @Test
+     public void testDoubleTapOnHomeBehavior_AppSwitchBehavior() {
+-        mPhoneWindowManager.overriderDoubleTapOnHomeBehavior(DOUBLE_TAP_HOME_RECENT_SYSTEM_UI);
++        mPhoneWindowManager.overrideDoubleTapOnHomeAction(Action.APP_SWITCH);
+         sendKeyCombination(new int[]{KeyEvent.KEYCODE_HOME}, 0 /* duration */);
+         sendKeyCombination(new int[]{KeyEvent.KEYCODE_HOME}, 0 /* duration */);
+         mPhoneWindowManager.assertKeyGestureCompleted(
+diff --git a/services/tests/wmtests/src/com/android/server/policy/TestPhoneWindowManager.java b/services/tests/wmtests/src/com/android/server/policy/TestPhoneWindowManager.java
+index 33926297e047..02bebd692079 100644
+--- a/services/tests/wmtests/src/com/android/server/policy/TestPhoneWindowManager.java
++++ b/services/tests/wmtests/src/com/android/server/policy/TestPhoneWindowManager.java
+@@ -129,7 +129,9 @@ import org.mockito.MockSettings;
+ import org.mockito.Mockito;
+ import org.mockito.MockitoAnnotations;
+ import org.mockito.quality.Strictness;
++import org.lineageos.internal.util.DeviceKeysConstants.Action;
+ 
++import java.lang.reflect.Field;
+ import java.util.List;
+ import java.util.function.Supplier;
+ 
+@@ -512,12 +514,22 @@ class TestPhoneWindowManager {
+         }
+     }
+ 
+-    void overrideLongPressOnHomeBehavior(int behavior) {
+-        mPhoneWindowManager.mLongPressOnHomeBehavior = behavior;
++    void overrideLongPressOnHomeAction(Action action) {
++        setPhoneWindowManagerField("mHomeLongPressAction", action);
+     }
+ 
+-    void overriderDoubleTapOnHomeBehavior(int behavior) {
+-        mPhoneWindowManager.mDoubleTapOnHomeBehavior = behavior;
++    void overrideDoubleTapOnHomeAction(Action action) {
++        setPhoneWindowManagerField("mHomeDoubleTapAction", action);
++    }
++
++    private void setPhoneWindowManagerField(String name, Object value) {
++        try {
++            final Field field = PhoneWindowManager.class.getDeclaredField(name);
++            field.setAccessible(true);
++            field.set(mPhoneWindowManager, value);
++        } catch (ReflectiveOperationException e) {
++            throw new AssertionError("Unable to override " + name, e);
++        }
+     }
+ 
+     void overrideCanStartDreaming(boolean canDream) {
+diff --git a/services/tests/wmtests/src/com/android/server/wm/ActivityRecordTests.java b/services/tests/wmtests/src/com/android/server/wm/ActivityRecordTests.java
+index 55665087ab55..1b4c8146e344 100644
+--- a/services/tests/wmtests/src/com/android/server/wm/ActivityRecordTests.java
++++ b/services/tests/wmtests/src/com/android/server/wm/ActivityRecordTests.java
+@@ -3320,7 +3320,8 @@ public class ActivityRecordTests extends WindowTestsBase {
+ 
+         // Request the activity to be invisible. Since the visibility changes, app transition
+         // animation should be applied on this activity.
+-        activity.mTransitionController.requestCloseTransitionIfNeeded(activity);
++        activity.mTransitionController.requestCloseTransitionIfNeeded(
++                activity, false /* endTask */);
+         activity.setVisibility(false);
+         assertTrue(activity.isVisible());
+         assertFalse(activity.isVisibleRequested());
+diff --git a/services/tests/wmtests/src/com/android/server/wm/DeviceStateAutoRotateSettingControllerTests.java b/services/tests/wmtests/src/com/android/server/wm/DeviceStateAutoRotateSettingControllerTests.java
+index 6840c05bf257..1e13fca4add2 100644
+--- a/services/tests/wmtests/src/com/android/server/wm/DeviceStateAutoRotateSettingControllerTests.java
++++ b/services/tests/wmtests/src/com/android/server/wm/DeviceStateAutoRotateSettingControllerTests.java
+@@ -476,11 +476,11 @@ public class DeviceStateAutoRotateSettingControllerTests {
+         mTestLooper.dispatchAll();
+ 
+         mDeviceStateAutoRotateSettingController.requestAccelerometerRotationSettingChange(
+-                false, getNaturalRotation, "");
++                false, getNaturalRotation(), "");
+         mTestLooper.dispatchAll();
+ 
+         verify(mMockDisplayRotation).setUserRotationSetting(
+-                eq(WindowManagerPolicy.USER_ROTATION_LOCKED), eq(getNaturalRotation), any());
++                eq(WindowManagerPolicy.USER_ROTATION_LOCKED), eq(getNaturalRotation()), any());
+     }
+ 
+     @Test
+@@ -586,7 +586,7 @@ public class DeviceStateAutoRotateSettingControllerTests {
+         mTestLooper.dispatchAll();
+ 
+         verify(mMockDisplayRotation).setUserRotationSetting(
+-                eq(WindowManagerPolicy.USER_ROTATION_LOCKED), eq(getNaturalRotation), any());
++                eq(WindowManagerPolicy.USER_ROTATION_LOCKED), eq(getNaturalRotation()), any());
+     }
+ 
+     private void setDeviceStateAutoRotateSetting(SparseIntArray deviceStateAutoRotateSetting) {
+diff --git a/services/tests/wmtests/src/com/android/server/wm/InsetsPolicyTest.java b/services/tests/wmtests/src/com/android/server/wm/InsetsPolicyTest.java
+index dff6ec36aefa..93bf42c6478f 100644
+--- a/services/tests/wmtests/src/com/android/server/wm/InsetsPolicyTest.java
++++ b/services/tests/wmtests/src/com/android/server/wm/InsetsPolicyTest.java
+@@ -368,7 +368,8 @@ public class InsetsPolicyTest extends WindowTestsBase {
+                 app,
+                 0 /* displayForciblyShowingTypes */,
+                 0 /* displayForciblyHidingTypes */,
+-                false /* showSystemBarsByLegacyPolicy */);
++                false /* showSystemBarsByLegacyPolicy */,
++                false /* inPortPopUpView */);
+ 
+         statusBarProvider.updateClientVisibility(statusBarProvider.getControlTarget(), null);
+         navBarProvider.updateClientVisibility(navBarProvider.getControlTarget(), null);
+@@ -419,7 +420,8 @@ public class InsetsPolicyTest extends WindowTestsBase {
+                 app,
+                 statusBars() /* displayForciblyShowingTypes */,
+                 0 /* displayForciblyHidingTypes */,
+-                false /* showSystemBarsByLegacyPolicy */);
++                false /* showSystemBarsByLegacyPolicy */,
++                false /* inPortPopUpView */);
+ 
+         statusBarProvider.updateClientVisibility(statusBarProvider.getControlTarget(), null);
+         navBarProvider.updateClientVisibility(navBarProvider.getControlTarget(), null);
+@@ -471,7 +473,8 @@ public class InsetsPolicyTest extends WindowTestsBase {
+                 app,
+                 0 /* displayForciblyShowingTypes */,
+                 statusBars() /* displayForciblyHidingTypes */,
+-                false /* showSystemBarsByLegacyPolicy */);
++                false /* showSystemBarsByLegacyPolicy */,
++                false /* inPortPopUpView */);
+ 
+         statusBarProvider.updateClientVisibility(statusBarProvider.getControlTarget(), null);
+         navBarProvider.updateClientVisibility(navBarProvider.getControlTarget(), null);
+@@ -523,7 +526,8 @@ public class InsetsPolicyTest extends WindowTestsBase {
+                 app,
+                 0 /* displayForciblyShowingTypes */,
+                 0 /* displayForciblyHidingTypes */,
+-                true /* showSystemBarsByLegacyPolicy */);
++                true /* showSystemBarsByLegacyPolicy */,
++                false /* inPortPopUpView */);
+ 
+         statusBarProvider.updateClientVisibility(statusBarProvider.getControlTarget(), null);
+         navBarProvider.updateClientVisibility(navBarProvider.getControlTarget(), null);
+@@ -573,7 +577,8 @@ public class InsetsPolicyTest extends WindowTestsBase {
+                 app,
+                 0 /* displayForciblyShowingTypes */,
+                 0 /* displayForciblyHidingTypes */,
+-                true /* showSystemBarsByLegacyPolicy */);
++                true /* showSystemBarsByLegacyPolicy */,
++                false /* inPortPopUpView */);
+ 
+         statusBarProvider.updateClientVisibility(statusBarProvider.getControlTarget(), null);
+         navBarProvider.updateClientVisibility(navBarProvider.getControlTarget(), null);
+@@ -623,7 +628,8 @@ public class InsetsPolicyTest extends WindowTestsBase {
+                 app,
+                 0 /* displayForciblyShowingTypes */,
+                 statusBars() /* displayForciblyHidingTypes */,
+-                true /* showSystemBarsByLegacyPolicy */);
++                true /* showSystemBarsByLegacyPolicy */,
++                false /* inPortPopUpView */);
+ 
+         statusBarProvider.updateClientVisibility(statusBarProvider.getControlTarget(), null);
+         navBarProvider.updateClientVisibility(navBarProvider.getControlTarget(), null);
+diff --git a/services/tests/wmtests/src/com/android/server/wm/RootTaskTests.java b/services/tests/wmtests/src/com/android/server/wm/RootTaskTests.java
+index fa5627ad2366..51b15db24e10 100644
+--- a/services/tests/wmtests/src/com/android/server/wm/RootTaskTests.java
++++ b/services/tests/wmtests/src/com/android/server/wm/RootTaskTests.java
+@@ -1139,7 +1139,7 @@ public class RootTaskTests extends WindowTestsBase {
+ 
+         registerTestTransitionPlayer();
+         final Transition transition = display.mTransitionController
+-                .requestCloseTransitionIfNeeded(rootTask1);
++                .requestCloseTransitionIfNeeded(rootTask1, true /* endTask */);
+         transition.collectClose(rootTask1);
+         // The display becomes empty. Since there is no next activity to be idle, the activity
+         // should be destroyed immediately with updating configuration to restore original state.

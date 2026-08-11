@@ -1,0 +1,30 @@
+From fd8ff16eef360ee1628e78b3d7383085bdea9a3a Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Tue, 11 Aug 2026 14:07:51 +0000
+Subject: [PATCH] netd: continue when cgroup v2 root is unavailable
+
+Change-Id: I090aca0212f2505f98edd35fc5e873bca88291d8
+---
+ server/main.cpp | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/server/main.cpp b/server/main.cpp
+index 1a79b83e..bbef7d89 100644
+--- a/server/main.cpp
++++ b/server/main.cpp
+@@ -136,8 +136,10 @@ int main() {
+ 
+     std::string cg2_path;
+     if (!CgroupGetControllerPath(CGROUPV2_HIERARCHY_NAME, &cg2_path)) {
+-        ALOGE("Failed to find cgroup v2 root %s", strerror(errno));
+-        exit(1);
++        // Waydroid containers may not expose the cgroup v2 subtree netd
++        // expects. Keep netd alive; BPF and cgroup features degrade to
++        // no-ops instead of aborting the boot.
++        ALOGW("Failed to find cgroup v2 root %s; continuing without it", strerror(errno));
+     }
+ 
+     if (libnetd_updatable_init(cg2_path.c_str())) {
+-- 
+2.43.0
+

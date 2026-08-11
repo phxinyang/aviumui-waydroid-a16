@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Mon, 10 Aug 2026 00:00:05 +0000
+Subject: [PATCH] platform_testing: drop removed Cuttlefish dependencies
+
+---
+diff --git a/Android.bp b/Android.bp
+index 442380cec..73f9cc190 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -43,8 +43,6 @@ test_package {
+         "CellBroadcastReceiverTests",
+         "ConnectivityUIDTest",
+         "CtsCameraTestCases",
+-        "CuttlefishRilTests",
+-        "CuttlefishWifiTests",
+         "Development",
+         "DeviceHealthChecks",
+         "DialerJankTests",
+diff --git a/tools/automotive/proxy/Android.bp b/tools/automotive/proxy/Android.bp
+index 67bc4b23c..a06e1fb8b 100644
+--- a/tools/automotive/proxy/Android.bp
++++ b/tools/automotive/proxy/Android.bp
+@@ -29,11 +29,11 @@ cc_binary {
+     target: {
+         host: {
+             static_libs: [
+-                "libcuttlefish_host_config",
++                // "libcuttlefish_host_config",  // cuttlefish removed by waydroid local manifest
+             ],
+         },
+     },
+-    defaults: ["cuttlefish_base"],
++    // defaults: ["cuttlefish_base"],  // cuttlefish removed by waydroid local manifest
+     host_supported: true,
+     vendor: true,
+ }

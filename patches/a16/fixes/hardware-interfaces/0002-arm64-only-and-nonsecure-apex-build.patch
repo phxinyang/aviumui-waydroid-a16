@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Mon, 10 Aug 2026 00:00:04 +0000
+Subject: [PATCH] interfaces: build Waydroid arm64-only nonsecure services
+
+---
+diff --git a/camera/provider/2.7/default/Android.bp b/camera/provider/2.7/default/Android.bp
+index 8d7cd7233d..822fa4f73b 100644
+--- a/camera/provider/2.7/default/Android.bp
++++ b/camera/provider/2.7/default/Android.bp
+@@ -60,7 +60,7 @@ cc_defaults {
+     proprietary: true,
+     relative_install_path: "hw",
+     srcs: ["external-service.cpp"],
+-    compile_multilib: "32",
++    compile_multilib: "both",  // 64-bit-only fix: "32" variant is dropped on arm64_only
+     shared_libs: [
+         "android.hardware.camera.common@1.0",
+         "android.hardware.camera.device@1.0",
+diff --git a/gatekeeper/aidl/software/Android.bp b/gatekeeper/aidl/software/Android.bp
+index cbd9484cf2..09e5100bf0 100644
+--- a/gatekeeper/aidl/software/Android.bp
++++ b/gatekeeper/aidl/software/Android.bp
+@@ -63,9 +63,9 @@ prebuilt_etc {
+ apex {
+     name: "com.android.hardware.gatekeeper.nonsecure",
+     binaries: ["android.hardware.gatekeeper-service.nonsecure"],
+-    certificate: ":com.google.cf.apex.certificate",
++    certificate: ":com.android.hardware.certificate",  // was cuttlefish-only
+     file_contexts: "file_contexts",
+-    key: "com.google.cf.apex.key",
++    key: "com.android.hardware.key",  // was cuttlefish-only
+     manifest: "manifest.json",
+     prebuilts: [
+         "gatekeeper_nonsecure_vintf",
+diff --git a/gatekeeper/aidl/software/rust/Android.bp b/gatekeeper/aidl/software/rust/Android.bp
+index bb7112e89c..27582753fe 100644
+--- a/gatekeeper/aidl/software/rust/Android.bp
++++ b/gatekeeper/aidl/software/rust/Android.bp
+@@ -51,9 +51,9 @@ prebuilt_etc {
+ apex {
+     name: "com.android.hardware.gatekeeper.rust.nonsecure",
+     binaries: ["android.hardware.gatekeeper-service.rust.nonsecure"],
+-    certificate: ":com.google.cf.apex.certificate",
++    certificate: ":com.android.hardware.certificate",  // was cuttlefish-only
+     file_contexts: "file_contexts",
+-    key: "com.google.cf.apex.key",
++    key: "com.android.hardware.key",  // was cuttlefish-only
+     manifest: "manifest.json",
+     prebuilts: [
+         "gatekeeper_nonsecure_vintf",
+diff --git a/security/keymint/aidl/default/Android.bp b/security/keymint/aidl/default/Android.bp
+index 10f6f5e58d..97484c8684 100644
+--- a/security/keymint/aidl/default/Android.bp
++++ b/security/keymint/aidl/default/Android.bp
+@@ -183,7 +183,7 @@ apex {
+     name: "com.android.hardware.keymint.rust_nonsecure",
+     manifest: "manifest.json",
+     file_contexts: "file_contexts",
+-    key: "com.google.cf.apex.key",
++    key: "com.android.hardware.key",  // was cuttlefish-only
+     certificate: ":com.android.hardware.certificate",
+     soc_specific: true,
+     updatable: false,
