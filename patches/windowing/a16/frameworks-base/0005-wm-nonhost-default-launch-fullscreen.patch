@@ -16,25 +16,28 @@ display:
 - trusted host launches (and same-task navigation into a host task) stay
   freeform on the desk;
 - every other default-display launch that would enter Waydroid freeform
-  windowing (the launch itself or its root is freeform) is taken out of the
-  freeform desk root, reparented to the task display area and forced to
-  fullscreen;
-- normal Android fullscreen / multi-window (split) launches are untouched;
+  windowing (the launch itself, its root, or the display's TaskDisplayArea is
+  in freeform mode) is taken out of the freeform desk root, reparented to the
+  task display area and forced to fullscreen;
+- explicit freeform / split-screen (multi-window) launch requests keep their
+  mode;
 - non-default displays (Avium/MiFreeform) are never touched.
 
 diff --git a/services/core/java/com/android/server/wm/ActivityStarter.java b/services/core/java/com/android/server/wm/ActivityStarter.java
-index c4437d316415..d6ffe104ad8c 100644
+index c4437d316415..833c3b9c459c 100644
 --- a/services/core/java/com/android/server/wm/ActivityStarter.java
 +++ b/services/core/java/com/android/server/wm/ActivityStarter.java
-@@ -31,6 +31,7 @@ import static android.app.ActivityManager.isStartResultSuccessful;
+@@ -31,7 +31,9 @@ import static android.app.ActivityManager.isStartResultSuccessful;
  import static android.app.ActivityTaskManager.INVALID_TASK_ID;
  import static android.app.PendingIntent.FLAG_CANCEL_CURRENT;
  import static android.app.PendingIntent.FLAG_ONE_SHOT;
 +import static android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM;
  import static android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN;
++import static android.app.WindowConfiguration.WINDOWING_MODE_MULTI_WINDOW;
  import static android.app.WindowConfiguration.WINDOWING_MODE_PINNED;
  import static android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED;
-@@ -1967,18 +1968,50 @@ class ActivityStarter {
+ import static android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK;
+@@ -1967,18 +1969,58 @@ class ActivityStarter {
          final boolean sameTaskNavigation = mSourceRecord != null
                  && mSourceRecord.getTask() == task;
          final boolean trustedHostLaunch = hasTrustedWaydroidHostWindowCookie();
@@ -73,12 +76,20 @@ index c4437d316415..d6ffe104ad8c 100644
 +        if (taskDisplayArea == null) {
 +            return;
 +        }
++        final int launchMode = mOptions != null
++                ? mOptions.getLaunchWindowingMode() : WINDOWING_MODE_UNDEFINED;
++        if (launchMode == WINDOWING_MODE_FREEFORM
++                || launchMode == WINDOWING_MODE_MULTI_WINDOW) {
++            // Explicit freeform / split-screen requests keep their mode.
++            return;
++        }
 +        final Task rootTask = task.getRootTask();
-+        final boolean enteringWaydroidFreeform =
-+                task.inFreeformWindowingMode()
++        final boolean waydroidDeskContext =
++                taskDisplayArea.getWindowingMode() == WINDOWING_MODE_FREEFORM
++                || task.inFreeformWindowingMode()
 +                || (rootTask != null && rootTask.inFreeformWindowingMode());
-+        if (!enteringWaydroidFreeform) {
-+            // Normal Android fullscreen / multi-window launches are untouched.
++        if (!waydroidDeskContext) {
++            // Normal Android fullscreen launches are untouched.
 +            return;
 +        }
 +        if (rootTask != null && rootTask != task) {
