@@ -31,7 +31,7 @@
   {
    "path": "hardware/waydroid",
    "base_tree": "62d1bbd926cc744ad8f080cfc91cbfdb9e915264",
-   "expected_tree": "f165b5816ed3d8a7eb40c6ca9d89cfc7753ba9a6",
+   "expected_tree": "e661026596fb3d5a80106c66ce35401b73f51ab4",
    "patches": [
     {
      "path": "a16/hardware-waydroid/0001-framework-routed-hybrid-windows.patch",
@@ -43,7 +43,7 @@
     },
     {
      "path": "a16/hardware-waydroid/0003-hwc-host-tiled-configures.patch",
-     "sha256": "49296d181cd38dd4ade6ac1ea7b9d8c28aef8ec8a19bf7a19132e0afa456912b"
+     "sha256": "350db9a3a7546864de29f1d7d10ce9e8780444fca649efee14747ad6264eb9c5"
     }
    ]
   },
