@@ -1,15 +1,15 @@
-From 0d1728a99abc483c7fb643dc0f927baabec6858b Mon Sep 17 00:00:00 2001
+From 9330519ee6fcf799bec05543f0172b45890ec7b9 Mon Sep 17 00:00:00 2001
 From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
 Date: Wed, 12 Aug 2026 00:36:28 +0000
 Subject: [PATCH] hwcomposer: treat xdg TILED configures as host geometry
 
 ---
- hwcomposer/wayland-hwc.cpp | 30 ++++++++++++++++++++++++++----
+ hwcomposer/wayland-hwc.cpp | 36 ++++++++++++++++++++++++++++++++----
  hwcomposer/wayland-hwc.h   |  6 +++++-
- 2 files changed, 31 insertions(+), 5 deletions(-)
+ 2 files changed, 37 insertions(+), 5 deletions(-)
 
 diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
-index b365205..3882e38 100644
+index b365205..69dc8ef 100644
 --- a/hwcomposer/wayland-hwc.cpp
 +++ b/hwcomposer/wayland-hwc.cpp
 @@ -228,6 +228,7 @@ xdg_toplevel_handle_configure(void *data, struct xdg_toplevel *,
@@ -20,7 +20,7 @@ index b365205..3882e38 100644
          const auto *state_data = static_cast<const uint32_t *>(states->data);
          for (size_t i = 0; i < states->size / sizeof(*state_data); ++i) {
              const uint32_t state = state_data[i];
-@@ -239,7 +240,24 @@ xdg_toplevel_handle_configure(void *data, struct xdg_toplevel *,
+@@ -239,7 +240,30 @@ xdg_toplevel_handle_configure(void *data, struct xdg_toplevel *,
                      || state == XDG_TOPLEVEL_STATE_FULLSCREEN) {
                  configured_state = waydroid_task_window_state::Maximized;
              }
@@ -42,10 +42,16 @@ index b365205..3882e38 100644
 +        const bool tiled_changed =
 +                host_tiled || window->last_host_tiled_configure;
 +        window->last_host_tiled_configure = host_tiled;
++        ALOGI("TASK_XDG_STATES task=%s n=%zu tiled=%d max=%d resizing=%d "
++                "activated=%d suggest=%dx%d",
++                window->taskID.c_str(), states->size / sizeof(*state_data),
++                host_tiled ? 1 : 0,
++                configured_state == waydroid_task_window_state::Maximized ? 1 : 0,
++                drag_resizing ? 1 : 0, activated ? 1 : 0, width, height);
          const bool task_state_transition = window->observe_task_window_state(
                  configured_state, activated);
          if (task_state_transition) {
-@@ -256,7 +274,7 @@ xdg_toplevel_handle_configure(void *data, struct xdg_toplevel *,
+@@ -256,7 +280,7 @@ xdg_toplevel_handle_configure(void *data, struct xdg_toplevel *,
          if (!window->host_task_window_state_request_pending
                  || !drag_resizing) {
              window->queue_task_configure(width, height, drag_resizing,
@@ -54,7 +60,7 @@ index b365205..3882e38 100644
          }
          // xdg_surface.configure owns the post-ack HWC wakeup.
          return;
-@@ -550,7 +568,7 @@ bool window::get_numeric_task_id(uint32_t *task_id) const {
+@@ -550,7 +574,7 @@ bool window::get_numeric_task_id(uint32_t *task_id) const {
  }
  
  void window::queue_task_configure(int32_t width, int32_t height,
@@ -63,7 +69,7 @@ index b365205..3882e38 100644
      if (width > 1 && height > 1) {
          last_queued_task_configure_width = width;
          last_queued_task_configure_height = height;
-@@ -565,7 +583,8 @@ void window::queue_task_configure(int32_t width, int32_t height,
+@@ -565,7 +589,8 @@ void window::queue_task_configure(int32_t width, int32_t height,
      }
      const uint32_t packed_height = static_cast<uint32_t>(height)
              | (drag_resizing ? UINT32_C(0x80000000) : 0)
@@ -73,7 +79,7 @@ index b365205..3882e38 100644
      const uint64_t size =
              (static_cast<uint64_t>(static_cast<uint32_t>(width)) << 32) |
              packed_height;
-@@ -584,6 +603,8 @@ bool window::take_task_configure(int32_t *width, int32_t *height) {
+@@ -584,6 +609,8 @@ bool window::take_task_configure(int32_t *width, int32_t *height) {
              (packed_height & UINT32_C(0x80000000)) != 0;
      taken_task_state_transition =
              (packed_height & UINT32_C(0x40000000)) != 0;
@@ -82,7 +88,7 @@ index b365205..3882e38 100644
      return *width > 1 && *height > 1;
  }
  
-@@ -617,7 +638,8 @@ void window::handle_task_configure(int32_t width, int32_t height) {
+@@ -617,7 +644,8 @@ void window::handle_task_configure(int32_t width, int32_t height) {
          return;
      const bool drag_resizing = taken_task_drag_resizing;
      const bool host_geometry_authoritative = drag_resizing
