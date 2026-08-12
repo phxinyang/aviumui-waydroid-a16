@@ -4,7 +4,7 @@
   {
    "path": "frameworks/base",
    "base_tree": "4af36c9bec5cc91b8ace1361731b74e4be18b363",
-   "expected_tree": "b3b1ae6ceaa25d911a8f00c3b07397edb25bdc43",
+   "expected_tree": "3f957dbbe53bc55af3ba94faeb548cf701e17f49",
    "patches": [
     {
      "path": "a16/frameworks-base/0001-wm-per-task-host-window-routing.patch",
@@ -25,6 +25,10 @@
     {
      "path": "a16/frameworks-base/0005-wm-nonhost-default-launch-fullscreen.patch",
      "sha256": "2fd5ba597233fcdad4e7e9a02a9fd4834d35ad515bc333ad4cb17cc5a9c84a5c"
+    },
+    {
+     "path": "a16/frameworks-base/0006-wm-only-host-tasks-get-desktop-decor.patch",
+     "sha256": "aa28bb03fa15e18bca0cfaf3667c718cb757e11405e847997588a235519eebe4"
     }
    ]
   },

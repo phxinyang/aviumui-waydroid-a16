@@ -1,0 +1,64 @@
+From 6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5d Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Wed, 12 Aug 2026 06:40:00 +0000
+Subject: [PATCH] wm: only Waydroid host tasks get desktop captions
+
+The Linux-desktop coexistence contract is: only tasks launched from the
+Linux desktop (trusted Waydroid host cookie) become independent windows with
+the desktop caption/header.  Every other path (AviumUI fullscreen apps, the
+Avium/MiFreeform native mini, Android-internal launches) must keep the
+pristine AviumUI presentation with no window bar.
+
+AppHandleAndHeaderVisibilityHelper.allowedForTask currently returns true for
+every freeform task and for standard fullscreen tasks on desktop displays,
+so internal tasks also get Caption/DecorContainer layers.  Gate the app
+handle/header on isWaydroidHostWindow.
+
+Also, the non-host default-display route policy (0005) forced every launch
+that is not explicitly freeform/split-screen to fullscreen; explicit
+RisingOS pop-up modes (WINDOWING_MODE_PINNED_WINDOW_EXT=101 and
+WINDOWING_MODE_MINI_WINDOW_EXT=102) must keep their mode as well.
+
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/common/AppHandleAndHeaderVisibilityHelper.kt b/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/common/AppHandleAndHeaderVisibilityHelper.kt
+index 6a06b08b1f6d..5f35fc5afa66 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/common/AppHandleAndHeaderVisibilityHelper.kt
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/common/AppHandleAndHeaderVisibilityHelper.kt
+@@ -63,6 +63,13 @@ class AppHandleAndHeaderVisibilityHelper(
+         taskInfo: ActivityManager.RunningTaskInfo,
+         display: Display,
+     ): Boolean {
++        // Only Waydroid host-launched tasks (independent Linux windows) get
++        // the desktop caption/header; everything else keeps the pristine
++        // AviumUI presentation (fullscreen apps and the native mini have no
++        // window bar).
++        if (!taskInfo.isWaydroidHostWindow) {
++            return false
++        }
+         if (taskInfo.windowingMode == WINDOWING_MODE_FREEFORM) {
+             return true
+         }
+diff --git a/services/core/java/com/android/server/wm/ActivityStarter.java b/services/core/java/com/android/server/wm/ActivityStarter.java
+index 833c3b9c459c..bb4d74a18305 100644
+--- a/services/core/java/com/android/server/wm/ActivityStarter.java
++++ b/services/core/java/com/android/server/wm/ActivityStarter.java
+@@ -36,6 +36,7 @@ import static android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN;
+ import static android.app.WindowConfiguration.WINDOWING_MODE_MULTI_WINDOW;
+ import static android.app.WindowConfiguration.WINDOWING_MODE_PINNED;
+ import static android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED;
++import static android.app.WindowConfiguration.isPopUpWindowMode;
+ import static android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK;
+ import static android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP;
+ import static android.content.Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT;
+@@ -2002,8 +2003,10 @@ class ActivityStarter {
+         final int launchMode = mOptions != null
+                 ? mOptions.getLaunchWindowingMode() : WINDOWING_MODE_UNDEFINED;
+         if (launchMode == WINDOWING_MODE_FREEFORM
+-                || launchMode == WINDOWING_MODE_MULTI_WINDOW) {
+-            // Explicit freeform / split-screen requests keep their mode.
++                || launchMode == WINDOWING_MODE_MULTI_WINDOW
++                || isPopUpWindowMode(launchMode)) {
++            // Explicit freeform / split-screen / popup (mini+pinned) requests
++            // keep their mode.
+             return;
+         }
+         final Task rootTask = task.getRootTask();

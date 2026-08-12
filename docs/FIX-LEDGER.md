@@ -28,6 +28,7 @@
 | A16 aconfig 未启用 `ACCESS_TEXT_CLASSIFIER_BY_TYPE`，ExtServices 启动抛 SecurityException | packages/modules/ExtServices 捕获异常并降级 `NO_OP` | 已纳入 release series；分类为运行时健壮性防护 |
 | A16 aconfig 未启用 `ENTER_TRADE_IN_MODE`，DeviceDiagnostics 启动抛 SecurityException | packages/apps/DeviceDiagnostics 捕获异常并跳过 trade-in 启动 | 已纳入 release series；分类为运行时健壮性防护 |
 | AviumUI 的 Quickstep“上滑悬停进小窗”手势是死代码：`persist.avium.launchergesture` 默认关闭，且 `CUSTOM_GESTURE_TRIGGER_THRESHOLD = 3.5f` 超过 `mCurrentShift` 上限（clamp 到 `mDragLengthFactor`，平板约 1.3–1.7）永远不可达；即使触发，`onAviumFloatWindowGesture` 走框架 PopUp（mode 101）而不是 FreeformService 原生小窗 | Launcher3 补丁：阈值降到 1.1（超过完整多任务、仍可达），手势改发 `org.avium.LAUNCHER_MINI_WINDOW` 广播进 FreeformService/MiFreeform 圆角原生小窗；device-waydroid 默认 `persist.avium.launchergesture=1` | 已纳入 window series（Launcher3 0001 + device-waydroid 0004）；locked replay r7 已验证，需真机手势复验 |
+| 桌面 Caption/DecorContainer 给所有 freeform 任务和桌面全屏任务都画窗口栏，内部应用（全屏/小窗）也被画上“窗口栏”，违反“只有 Linux 桌面 host 应用有窗口栏、其余保持 AviumUI 原版”的共存契约 | `AppHandleAndHeaderVisibilityHelper.allowedForTask` 只对 `isWaydroidHostWindow` 任务返回 true；`ActivityStarter.updateWaydroidHostWindowRoute` 同时放行显式 PopUp 101/102（不被强制全屏） | 已纳入 window series（frameworks-base 0006）；locked replay r8 已验证，需真机复验 |
 
 这些条目的精确 patch 路径和完成 tree 以 series JSON 为准；历史因果和日志交叉核对可见 [`docs/FIXES.md`](FIXES.md)。
 
