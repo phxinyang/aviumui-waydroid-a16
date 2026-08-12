@@ -1,0 +1,22 @@
+From 6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5c Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Wed, 12 Aug 2026 05:30:00 +0000
+Subject: [PATCH] waydroid: enable Avium launcher mini gesture by default
+
+The AviumUI native mini gesture (persist.avium.launchergesture) defaults off;
+enable it in the Waydroid product so the swipe-up-and-hold-to-mini gesture is
+available out of the box.
+
+diff --git a/system.prop b/system.prop
+--- a/system.prop
++++ b/system.prop
+@@ -42,4 +42,7 @@ ro.lmk.use_new_strategy=true
+ ro.lmk.use_new_strategy=true
+ 
+ # Material 3 Expressive
+ is_expressive_design_enabled=true
++
++# AviumUI native mini gesture (swipe up and hold to enter mini window)
++persist.avium.launchergesture=1
+-- 
+2.43.0

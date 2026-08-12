@@ -1,0 +1,72 @@
+From 6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5b Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Wed, 12 Aug 2026 05:20:00 +0000
+Subject: [PATCH] launcher3: enable Avium native mini gesture
+
+The AviumUI "swipe up and hold to enter mini window" gesture was dead code:
+persist.avium.launchergesture defaults off and the 3.5f trigger threshold is
+unreachable because mCurrentShift is clamped to mDragLengthFactor (~1.3-1.7 on
+tablets). Lower the threshold to 1.1f (past full overview, still reachable)
+and route the gesture to the AviumUI native mini (org.avium.LAUNCHER_MINI_WINDOW
+-> FreeformService/MiFreeform) instead of the framework pop-up windowing mode,
+so the release produces the rounded native mini window without a caption.
+
+diff --git a/quickstep/src/com/android/quickstep/AbsSwipeUpHandler.java b/quickstep/src/com/android/quickstep/AbsSwipeUpHandler.java
+--- a/quickstep/src/com/android/quickstep/AbsSwipeUpHandler.java
++++ b/quickstep/src/com/android/quickstep/AbsSwipeUpHandler.java
+@@ -243,7 +243,12 @@ public abstract class AbsSwipeUpHandler<
+     //Ext add
+-    private static final float CUSTOM_GESTURE_TRIGGER_THRESHOLD = 3.5f;
++    private static final float CUSTOM_GESTURE_TRIGGER_THRESHOLD = 1.1f;
+     private static final String ACTION_PIN_LAST_APP = "org.avium.PINNED_LAST_APP";
+     private boolean mAviumGestureHintShown = false;
+     private Toast mAviumGestureToast = null;
++    private static final String ACTION_AVIUM_LAUNCH_MINI_WINDOW =
++            "org.avium.LAUNCHER_MINI_WINDOW";
++    private static final String EXTRA_AVIUM_PACKAGE_NAME = "packageName";
++    private static final String EXTRA_AVIUM_ACTIVITY_NAME = "activityName";
++    private static final String EXTRA_AVIUM_USER_ID = "userId";
+ 
+     private static int FLAG_COUNT = 0;
+@@ -3284,23 +3284,27 @@ public abstract class AbsSwipeUpHandler<
+         final ActivityManager.RecentTaskInfo currentTask = recentTasks.get(0);
+-        final int taskId = currentTask.id;
+ 
+         final String launcherPackageName = mContext.getPackageName();
+-        if (currentTask.baseIntent != null && launcherPackageName.equals(currentTask.baseIntent.getComponent().getPackageName())) {
++        if (currentTask.baseIntent != null
++                && currentTask.baseIntent.getComponent() != null
++                && launcherPackageName.equals(currentTask.baseIntent.getComponent().getPackageName())) {
+             return;
+         }
+ 
+-        if (taskId <= 0) {
+-
++        ComponentName component = currentTask.topActivity;
++        if (component == null && currentTask.baseIntent != null) {
++            component = currentTask.baseIntent.getComponent();
++        }
++        if (component == null) {
+             return;
+         }
+ 
+-        final ActivityOptions options = ActivityOptions.makeBasic();
+-        options.setLaunchWindowingMode(101); 
+-
+-        try {
+-            ActivityTaskManager.getService().startActivityFromRecents(taskId, options.toBundle());
+-        } catch (Exception e) {
+-            //do nothing
+-        }
++        // Route through AviumUI's native mini (FreeformService/MiFreeform) so
++        // the gesture produces the rounded native mini window instead of a
++        // framework pop-up/freeform task with a caption.
++        final Intent miniIntent = new Intent(ACTION_AVIUM_LAUNCH_MINI_WINDOW);
++        miniIntent.putExtra(EXTRA_AVIUM_PACKAGE_NAME, component.getPackageName());
++        miniIntent.putExtra(EXTRA_AVIUM_ACTIVITY_NAME, component.getClassName());
++        miniIntent.putExtra(EXTRA_AVIUM_USER_ID, currentTask.userId);
++        mContext.sendBroadcast(miniIntent);
+     }
+ }
+-- 
+2.43.0

@@ -61,7 +61,7 @@
   {
    "path": "device/waydroid/waydroid",
    "base_tree": "f43124e5a78e22040202b6ad3b93d4e94de95608",
-   "expected_tree": "295b321687bd26ab4a2efd6afe667aadfacd4abd",
+   "expected_tree": "3ce631cc3070097052a4c12a64af224d162b384b",
    "patches": [
     {
      "path": "device-waydroid/0001-window-hal-1.3.patch",
@@ -74,6 +74,21 @@
     {
      "path": "device-waydroid/0003-arm64-allocator-and-mapper-selection.patch",
      "sha256": "1d33326b787e3ab302825fedf33d3a97e6a7322c229d092990240c1743b6e783"
+    },
+    {
+     "path": "device-waydroid/0004-enable-avium-launcher-gesture.patch",
+     "sha256": "9d29e7c21cb5778f04b68c24bb46ad9c006bc761c4a0b87db29b8c64cb77d3c8"
+    }
+   ]
+  },
+  {
+   "path": "packages/apps/Launcher3",
+   "base_tree": "284b6421bdacd3bcb31a4efaf411473f44bf122d",
+   "expected_tree": "2374dd0a5246b7d2e48b813b4198dcc66b5dffe1",
+   "patches": [
+    {
+     "path": "a16/launcher3/0001-enable-avium-native-mini-gesture.patch",
+     "sha256": "9c06a27f6bfac4af4944525b749a3ab1a4c7db073ecf9fbf2c621209c9fc3bfb"
     }
    ]
   }
