@@ -1,0 +1,116 @@
+From 3f8a2c1b4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f90 Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Wed, 12 Aug 2026 09:30:00 +0000
+Subject: [PATCH] hwcomposer: treat xdg TILED configures as host geometry
+
+GNOME tiles a window with Super+Left/Right/Up.  The configure carries
+XDG_TOPLEVEL_STATE_TILED_* without RESIZING or MAXIMIZED, so the task
+bridge classified it as an ordinary configure and ignored the new size;
+the host window moved to the tile position but kept its old width.
+Treat a change of the TILED state as compositor geometry authority
+(like an interactive drag) without changing the Android task state,
+so Android resizes the task to the tiled bounds and back on un-tile.
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+index b365205..37e5a6f 100644
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -228,6 +228,7 @@ xdg_toplevel_handle_configure(void *data, struct xdg_toplevel *,
+         auto configured_state = waydroid_task_window_state::Normal;
+         bool activated = false;
+         bool drag_resizing = false;
++        bool host_tiled = false;
+         const auto *state_data = static_cast<const uint32_t *>(states->data);
+         for (size_t i = 0; i < states->size / sizeof(*state_data); ++i) {
+             const uint32_t state = state_data[i];
+@@ -239,7 +240,20 @@ xdg_toplevel_handle_configure(void *data, struct xdg_toplevel *,
+                     || state == XDG_TOPLEVEL_STATE_FULLSCREEN) {
+                 configured_state = waydroid_task_window_state::Maximized;
+             }
++            if (state == XDG_TOPLEVEL_STATE_TILED_LEFT
++                    || state == XDG_TOPLEVEL_STATE_TILED_RIGHT
++                    || state == XDG_TOPLEVEL_STATE_TILED_TOP
++                    || state == XDG_TOPLEVEL_STATE_TILED_BOTTOM) {
++                host_tiled = true;
++            }
+         }
++        // A tiled configure is compositor geometry authority (the host
++        // window is moved and resized by the tile); the Android task state
++        // stays Normal because a half-screen tile is not an Android
++        // maximize.  Both entering and leaving the tile must apply.
++        const bool tiled_changed =
++                host_tiled != window->last_host_tiled_configure;
++        window->last_host_tiled_configure = host_tiled;
+         const bool task_state_transition = window->observe_task_window_state(
+                 configured_state, activated);
+         if (task_state_transition) {
+@@ -256,7 +270,7 @@ xdg_toplevel_handle_configure(void *data, struct xdg_toplevel *,
+         if (!window->host_task_window_state_request_pending
+                 || !drag_resizing) {
+             window->queue_task_configure(width, height, drag_resizing,
+-                    task_state_transition);
++                    task_state_transition, tiled_changed);
+         }
+         // xdg_surface.configure owns the post-ack HWC wakeup.
+         return;
+@@ -550,7 +564,7 @@ bool window::get_numeric_task_id(uint32_t *task_id) const {
+ }
+ 
+ void window::queue_task_configure(int32_t width, int32_t height,
+-        bool drag_resizing, bool state_transition) {
++        bool drag_resizing, bool state_transition, bool host_tiled) {
+     if (width > 1 && height > 1) {
+         last_queued_task_configure_width = width;
+         last_queued_task_configure_height = height;
+@@ -565,7 +579,8 @@ void window::queue_task_configure(int32_t width, int32_t height,
+     }
+     const uint32_t packed_height = static_cast<uint32_t>(height)
+             | (drag_resizing ? UINT32_C(0x80000000) : 0)
+-            | (state_transition ? UINT32_C(0x40000000) : 0);
++            | (state_transition ? UINT32_C(0x40000000) : 0)
++            | (host_tiled ? UINT32_C(0x20000000) : 0);
+     const uint64_t size =
+             (static_cast<uint64_t>(static_cast<uint32_t>(width)) << 32) |
+             packed_height;
+@@ -584,6 +599,8 @@ bool window::take_task_configure(int32_t *width, int32_t *height) {
+             (packed_height & UINT32_C(0x80000000)) != 0;
+     taken_task_state_transition =
+             (packed_height & UINT32_C(0x40000000)) != 0;
++    taken_host_tiled =
++            (packed_height & UINT32_C(0x20000000)) != 0;
+     return *width > 1 && *height > 1;
+ }
+ 
+@@ -617,7 +634,8 @@ void window::handle_task_configure(int32_t width, int32_t height) {
+         return;
+     const bool drag_resizing = taken_task_drag_resizing;
+     const bool host_geometry_authoritative = drag_resizing
+-            || host_drag_resizing || taken_task_state_transition;
++            || host_drag_resizing || taken_task_state_transition
++            || taken_host_tiled;
+     if (!host_geometry_authoritative) {
+         ALOGI("TASK_XDG_CONFIGURE task=%s carrier=unchanged"
+                 " suggestion=%dx%d reason=ordinary-configure",
+diff --git a/hwcomposer/wayland-hwc.h b/hwcomposer/wayland-hwc.h
+index 158c637..8692a45 100644
+--- a/hwcomposer/wayland-hwc.h
++++ b/hwcomposer/wayland-hwc.h
+@@ -310,6 +310,10 @@ struct window {
+     bool host_drag_resizing = false;
+     bool taken_task_drag_resizing = false;
+     bool taken_task_state_transition = false;
++    // xdg-shell TILED_* state from the last toplevel configure and the
++    // unpacked authority bit for the current task configure.
++    bool last_host_tiled_configure = false;
++    bool taken_host_tiled = false;
+     // Logical size last configured by the host compositor.  Once a
+     // task has an xdg configure, Android's asynchronous old frame must
+     // not resize the transparent carrier back to the previous size.
+@@ -348,7 +352,7 @@ struct window {
+     void enable_task_resize();
+     bool get_numeric_task_id(uint32_t *task_id) const;
+     void queue_task_configure(int32_t width, int32_t height,
+-            bool drag_resizing, bool state_transition);
++            bool drag_resizing, bool state_transition, bool host_tiled);
+     bool take_task_configure(int32_t *width, int32_t *height);
+     bool host_carrier_configured() const;
+     void apply_task_carrier_configure(int32_t width, int32_t height);
