@@ -67,7 +67,7 @@
     {
       "path": "hardware/waydroid",
       "base_tree": "62d1bbd926cc744ad8f080cfc91cbfdb9e915264",
-      "expected_tree": "a2fcb187a832fa28fc9495fe4632de79c546728c",
+      "expected_tree": "57418c1820d4801c2592028a47f0793517eb6468",
       "patches": [
         {
           "path": "a16/hardware-waydroid/0001-framework-routed-hybrid-windows.patch",
@@ -124,6 +124,10 @@
         {
           "path": "a16/hardware-waydroid/0014-hwc-touch-caption-restore.patch",
           "sha256": "3b5205b9c8f9c273d66f97a76edb0939e4fb12f9c1434998ac348637c9b109e6"
+        },
+        {
+          "path": "a16/hardware-waydroid/0015-hwc-caption-drag-only.patch",
+          "sha256": "4f3548ba984318ce6ea430b97f92c0961a5307d39c8bd951ee3824fd230dc38e"
         }
       ]
     },

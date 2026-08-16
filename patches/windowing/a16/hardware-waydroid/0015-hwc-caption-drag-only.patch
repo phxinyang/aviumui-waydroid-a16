@@ -1,0 +1,199 @@
+From 0f4fca2d23f43e07710c9553e45b768005259d5b Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Sun, 16 Aug 2026 14:01:22 +0000
+Subject: [PATCH] hwcomposer: host caption drag-only (clicks pass to the
+ caption)
+
+The caption strip claim fired on press/down, so the Android caption buttons
+(top-left menu, fullscreen control) were never clickable.  Press/down now
+only records a drag candidate; the claim (and unset_maximized + move /
+move) happens in the motion handler after the pointer/touch moves beyond a
+16px slop.  Clicks pass through to the caption.
+---
+ hwcomposer/wayland-hwc.cpp | 97 +++++++++++++++++++++++++++-----------
+ hwcomposer/wayland-hwc.h   | 12 +++++
+ 2 files changed, 81 insertions(+), 28 deletions(-)
+
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+index f72e1a6..b1aa9a5 100644
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -1482,6 +1482,9 @@ pointer_handle_motion(void *data, struct wl_pointer *,
+     y += input_frame.y;
+     display->pointer_display_y = y;
+ 
++    display->maybe_claim_host_caption_drag(display->pointer_surface,
++            x, y, display->pointer_button_serial, false);
++
+     ADD_EVENT(EV_ABS, ABS_X, x);
+     ADD_EVENT(EV_ABS, ABS_Y, y);
+     ADD_EVENT(EV_REL, REL_X, x - display->ptrPrvX);
+@@ -1609,9 +1612,15 @@ pointer_handle_button(void *data, struct wl_pointer *,
+     } else if (!display->pointer_surface) {
+         return;
+     }
+-    if (button == BTN_LEFT && state == WL_POINTER_BUTTON_STATE_PRESSED
+-            && display->begin_host_titlebar_move(serial)) {
+-        forward_to_android = false;
++    if (button == BTN_LEFT && state == WL_POINTER_BUTTON_STATE_PRESSED) {
++        // Record a drag candidate; the actual claim happens on motion so the
++        // Android caption (menu/fullscreen buttons) stays clickable.
++        display->host_caption_press_candidate(display->pointer_surface,
++                display->pointer_display_y, false);
++    } else if (button == BTN_LEFT
++            && state == WL_POINTER_BUTTON_STATE_RELEASED) {
++        std::scoped_lock input_lock(display->input_state_mutex);
++        display->caption_candidate_active = false;
+     }
+     if (forward_to_android)
+         send_pointer_button_to_android(display, button, state);
+@@ -1827,14 +1836,9 @@ touch_handle_down(void *data, struct wl_touch *,
+     x += input_frame.x;
+     y += input_frame.y;
+ 
+-    // A touch on the host caption strip owns the restore/move gesture,
+-    // mirroring the pointer caption drag (the framework has no caption to
+-    // initiate the drag itself while the desk-less decor infra is off).
+-    if (display->begin_host_titlebar_touch(x, y, serial, surface)) {
+-        forward_to_android = false;
+-    }
+-    if (!forward_to_android)
+-        return;
++    // A touch in the host caption strip is a drag candidate; the claim
++    // happens on motion so the Android caption buttons stay clickable.
++    display->host_caption_press_candidate(surface, y, true);
+ 
+     ADD_EVENT(EV_ABS, ABS_MT_SLOT, touch_id);
+     ADD_EVENT(EV_ABS, ABS_MT_TRACKING_ID, touch_id);
+@@ -1873,6 +1877,7 @@ touch_handle_up(void *data, struct wl_touch *,
+                 display->touch_down_serial = 0;
+                 display->touch_gesture_task_id.clear();
+                 display->active_gesture_task_id.clear();
++                display->caption_candidate_active = false;
+                 display->touch_sequence_owner = input_sequence_owner::None;
+             }
+         }
+@@ -1940,6 +1945,10 @@ touch_handle_motion(void *data, struct wl_touch *,
+         x += input_frame.x;
+         y += input_frame.y;
+ 
++        display->maybe_claim_host_caption_drag(
++                display->touch_surfaces[id], x, y, display->touch_down_serial,
++                true);
++
+         ADD_EVENT(EV_ABS, ABS_MT_SLOT, touch_id);
+         ADD_EVENT(EV_ABS, ABS_MT_TRACKING_ID, touch_id);
+         ADD_EVENT(EV_ABS, ABS_MT_POSITION_X, x);
+@@ -2126,14 +2135,7 @@ bool display::begin_host_titlebar_touch(int32_t display_x,
+                 target->taskID.c_str());
+         return false;
+     }
+-    if (display_y < target->task_top
+-            || display_y >= target->task_top + caption_height) {
+-        ALOGI("HOST_TITLEBAR_TOUCH_REJECT task=%s reason=outside-caption "
+-                "display_y=%d task_top=%d caption=%d",
+-                target->taskID.c_str(), display_y, target->task_top,
+-                caption_height);
+-        return false;
+-    }
++
+     uint32_t task_id = 0;
+     if (!target->get_numeric_task_id(&task_id)) {
+         ALOGI("HOST_TITLEBAR_TOUCH_REJECT task=%s reason=bad-task-id",
+@@ -2177,6 +2179,54 @@ bool display::begin_host_titlebar_touch(int32_t display_x,
+     return true;
+ }
+ 
++bool display::host_caption_press_candidate(struct wl_surface *surface,
++        int32_t display_y, bool touch) {
++    if (!seat)
++        return false;
++    const int caption_height = host_caption_height_px(this);
++    std::scoped_lock input_lock(input_state_mutex);
++    const auto layer_it = layers.find(surface);
++    if (layer_it == layers.end() || !layer_it->second.owner_window)
++        return false;
++    window *target = layer_it->second.owner_window;
++    if (!target->xdg_toplevel || !target->task_bounds_valid)
++        return false;
++    if (display_y < target->task_top
++            || display_y >= target->task_top + caption_height)
++        return false;
++    uint32_t task_id = 0;
++    if (!target->get_numeric_task_id(&task_id))
++        return false;
++    task_window_route route;
++    if (!get_task_window_route(task_id, &route) || !route.enabled)
++        return false;
++    caption_candidate_task = target->taskID;
++    caption_candidate_y = display_y;
++    caption_candidate_active = true;
++    caption_candidate_touch = touch;
++    ALOGI("HOST_CAPTION_CANDIDATE task=%s touch=%d y=%d",
++            target->taskID.c_str(), touch ? 1 : 0, display_y);
++    return true;
++}
++
++void display::maybe_claim_host_caption_drag(struct wl_surface *surface,
++        int32_t display_x, int32_t display_y, uint32_t serial, bool touch) {
++    const int slop = 16;
++    {
++        std::scoped_lock input_lock(input_state_mutex);
++        if (!caption_candidate_active || caption_candidate_touch != touch)
++            return;
++        if (abs(display_y - caption_candidate_y) < slop)
++            return;
++        caption_candidate_active = false;
++    }
++    if (touch) {
++        begin_host_titlebar_touch(display_x, display_y, serial, surface);
++    } else {
++        begin_host_titlebar_move(serial);
++    }
++}
++
+ bool display::begin_host_titlebar_move(uint32_t serial)
+ {
+     if (!seat) {
+@@ -2211,15 +2261,6 @@ bool display::begin_host_titlebar_move(uint32_t serial)
+     // Only the top caption strip starts an xdg move. The rest of the
+     // host window keeps its Android input semantics, so buttons and app
+     // content remain unaffected.
+-    if (pointer_display_y < target->task_top
+-            || pointer_display_y >= target->task_top + caption_height) {
+-        ALOGI("HOST_TITLEBAR_REJECT task=%s reason=outside-caption "
+-                "pointer_display_y=%d task_top=%d caption=%d scale=%f",
+-                target->taskID.c_str(), pointer_display_y, target->task_top,
+-                caption_height, target->scale);
+-        return false;
+-    }
+-
+     uint32_t task_id = 0;
+     if (!target->get_numeric_task_id(&task_id)) {
+         ALOGI("HOST_TITLEBAR_REJECT task=%s reason=bad-task-id",
+diff --git a/hwcomposer/wayland-hwc.h b/hwcomposer/wayland-hwc.h
+index dba924c..6ee6ddb 100644
+--- a/hwcomposer/wayland-hwc.h
++++ b/hwcomposer/wayland-hwc.h
+@@ -622,6 +622,18 @@ struct display {
+     void stop_task_command_worker();
+     bool begin_task_window_drag(uint32_t task_id, uint32_t ctrl_type);
+     bool begin_host_titlebar_move(uint32_t serial);
++    // Drag-only host caption: a press/down in the caption strip is left
++    // to the Android caption (buttons clickable); the drag claims the
++    // sequence only after the pointer/touch moves beyond the slop.
++    bool host_caption_press_candidate(struct wl_surface *surface,
++            int32_t display_y, bool touch);
++    void maybe_claim_host_caption_drag(struct wl_surface *surface,
++            int32_t display_x, int32_t display_y, uint32_t serial,
++            bool touch);
++    std::string caption_candidate_task;
++    int caption_candidate_y = 0;
++    bool caption_candidate_active = false;
++    bool caption_candidate_touch = false;
+     bool begin_host_titlebar_touch(int32_t display_x, int32_t display_y,
+             uint32_t serial, struct wl_surface *surface);
+ 
+-- 
+2.43.0
+
