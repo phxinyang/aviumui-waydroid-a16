@@ -1,0 +1,33 @@
+From 24a65a49e0bcd4a6f34826dda4322ff8b43c37ee Mon Sep 17 00:00:00 2001
+From: Avium <build@avium.local>
+Date: Sat, 15 Aug 2026 16:36:32 +0000
+Subject: [PATCH 5/6] waydroid: loosen v4l2 avc encoder limits so MediaCodec
+ selects it
+
+---
+ configs/media_codecs_c2.xml | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/configs/media_codecs_c2.xml b/configs/media_codecs_c2.xml
+index 5132b60..54351de 100644
+--- a/configs/media_codecs_c2.xml
++++ b/configs/media_codecs_c2.xml
+@@ -13,13 +13,13 @@
+     <Include href="media_codecs_google_c2_video.xml" />
+     <Encoders>
+         <MediaCodec name="c2.v4l2.avc.encoder" type="video/avc">
+-            <Limit name="size" min="32x32" max="1920x1088" />
++            <Limit name="size" min="32x32" max="4096x4096" />
+             <Limit name="alignment" value="2x2" />
+             <Limit name="block-size" value="16x16" />
+-            <Limit name="blocks-per-second" range="1-244800" />
+-            <Limit name="bitrate" range="1-12000000" />
++            <Limit name="blocks-per-second" range="1-2448000" />
++            <Limit name="bitrate" range="1-120000000" />
+             <Limit name="concurrent-instances" max="8" />
+-            <Limit name="performance-point-1280x720" range="30-30" />
++            <Limit name="performance-point-1920x1088" range="30-60" />
+         </MediaCodec>
+     </Encoders>
+     <Decoders>
+

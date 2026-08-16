@@ -1,0 +1,27 @@
+From 1d4c66e0aa465c11b0155e3b2c18199d61950945 Mon Sep 17 00:00:00 2001
+From: Avium <build@avium.local>
+Date: Sat, 15 Aug 2026 18:00:26 +0000
+Subject: [PATCH 6/6] waydroid: disable veiled resizing so drags show live
+ content
+
+The HWC cannot composite the veiled-resize mirror surface, so caption drags
+moved the window but the content stayed hidden behind the veil. Use the
+direct FluidResize path so the live task surface moves during the drag.
+---
+ device.mk | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/device.mk b/device.mk
+index 9faa1e7..20bafad 100644
+--- a/device.mk
++++ b/device.mk
+@@ -221,7 +221,8 @@ PRODUCT_PACKAGES += \
+ PRODUCT_PROPERTY_OVERRIDES += \
+     media.c2.hal.selection=aidl \
+     ro.vendor.v4l2_codec2.encoder.supported.h264=true \
+-    ro.vendor.v4l2_codec2.decoder.supported.h264=true
++    ro.vendor.v4l2_codec2.decoder.supported.h264=true \
++    persist.wm.debug.desktop_veiled_resizing=false
+ 
+ PRODUCT_COPY_FILES += \
+     $(LOCAL_PATH)/configs/media_codecs.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs.xml \

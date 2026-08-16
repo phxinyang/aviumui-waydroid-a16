@@ -1,0 +1,26 @@
+From b9e25265fae491a413574485ae2d5be31fd3e7b6 Mon Sep 17 00:00:00 2001
+From: Avium <build@avium.local>
+Date: Sat, 15 Aug 2026 16:15:36 +0000
+Subject: [PATCH 4/6] waydroid: enable v4l2 h264 encoder/decoder components
+ (qcom-iris)
+
+---
+ device.mk | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/device.mk b/device.mk
+index bd254de..9faa1e7 100644
+--- a/device.mk
++++ b/device.mk
+@@ -219,7 +219,9 @@ PRODUCT_PACKAGES += \
+     libc2plugin_store
+ 
+ PRODUCT_PROPERTY_OVERRIDES += \
+-    media.c2.hal.selection=aidl
++    media.c2.hal.selection=aidl \
++    ro.vendor.v4l2_codec2.encoder.supported.h264=true \
++    ro.vendor.v4l2_codec2.decoder.supported.h264=true
+ 
+ PRODUCT_COPY_FILES += \
+     $(LOCAL_PATH)/configs/media_codecs.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs.xml \
+

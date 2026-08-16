@@ -1,0 +1,43 @@
+From e42e36c051f9b9f89cfc5c21e5fe3d26ff4f8d71 Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Thu, 13 Aug 2026 13:52:17 +0000
+Subject: [PATCH] wm: drop host route for official Avium PopUp
+
+Keep official AviumUI PopUp 101/102 source unchanged. Only clear a leftover
+Waydroid host-window route so the same-task mini is not wrapped in a Linux
+xdg title bar.
+
+Change-Id: I1227351566c4d0b5dc99bed36bf3c7d977e7f828
+---
+ .../com/android/server/wm/ActivityStarter.java     | 14 ++++++++++----
+ 1 file changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/services/core/java/com/android/server/wm/ActivityStarter.java b/services/core/java/com/android/server/wm/ActivityStarter.java
+index bb4d74a18305..62fd493f6d33 100644
+--- a/services/core/java/com/android/server/wm/ActivityStarter.java
++++ b/services/core/java/com/android/server/wm/ActivityStarter.java
+@@ -2002,11 +2002,17 @@ class ActivityStarter {
+         }
+         final int launchMode = mOptions != null
+                 ? mOptions.getLaunchWindowingMode() : WINDOWING_MODE_UNDEFINED;
++        if (isPopUpWindowMode(launchMode)
++                || task.getWindowConfiguration().isPopUpWindowMode()) {
++            // Official Avium PopUp 101/102 stays on the default display.
++            // Drop any leftover host route so the scaled mini is not wrapped
++            // in a Linux xdg title bar.
++            task.setWaydroidHostWindow(false);
++            return;
++        }
+         if (launchMode == WINDOWING_MODE_FREEFORM
+-                || launchMode == WINDOWING_MODE_MULTI_WINDOW
+-                || isPopUpWindowMode(launchMode)) {
+-            // Explicit freeform / split-screen / popup (mini+pinned) requests
+-            // keep their mode.
++                || launchMode == WINDOWING_MODE_MULTI_WINDOW) {
++            // Explicit freeform / split-screen requests keep their mode.
+             return;
+         }
+         final Task rootTask = task.getRootTask();
+-- 
+2.43.0
+

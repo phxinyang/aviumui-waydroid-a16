@@ -1,0 +1,25 @@
+From 30fab8f1827984104385c9f7c760be3d0defe854 Mon Sep 17 00:00:00 2001
+From: Avium <build@avium.local>
+Date: Sat, 15 Aug 2026 15:48:27 +0000
+Subject: [PATCH 3/6] waydroid: select AIDL codec2 HAL so the v4l2 store is
+ used
+
+---
+ device.mk | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/device.mk b/device.mk
+index 43d227b..bd254de 100644
+--- a/device.mk
++++ b/device.mk
+@@ -218,6 +218,9 @@ PRODUCT_PACKAGES += \
+     android.hardware.media.c2-service-v4l2 \
+     libc2plugin_store
+ 
++PRODUCT_PROPERTY_OVERRIDES += \
++    media.c2.hal.selection=aidl
++
+ PRODUCT_COPY_FILES += \
+     $(LOCAL_PATH)/configs/media_codecs.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs.xml \
+     $(LOCAL_PATH)/configs/media_codecs_c2.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs_c2.xml \
+

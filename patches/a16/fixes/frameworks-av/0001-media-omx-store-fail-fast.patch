@@ -1,0 +1,32 @@
+From c74523e6a005d1d464dd6be4d5b8a8e285bd8022 Mon Sep 17 00:00:00 2001
+From: Avium <build@avium.local>
+Date: Sat, 15 Aug 2026 11:30:17 +0000
+Subject: [PATCH] media: fail fast when OMX HAL store is absent
+
+OmxInfoBuilder calls IOmxStore::getService() which blocks forever retrying
+when the OMX HAL is not present (no OMX store in this Waydroid image), so
+every MediaCodecList construction hangs and all MediaCodec encoder/decoder
+creation (screenrecord, UURemote streaming) stalls. Use tryGetService() so
+the OMX section is skipped and the C2 software codecs are used instead.
+
+Change-Id: I121bd0e774f7ecae886ebcbb8d28ab6ac69ffa0a
+---
+ media/libstagefright/OmxInfoBuilder.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/media/libstagefright/OmxInfoBuilder.cpp b/media/libstagefright/OmxInfoBuilder.cpp
+index 1cb8f14fd5..5d79a8491d 100644
+--- a/media/libstagefright/OmxInfoBuilder.cpp
++++ b/media/libstagefright/OmxInfoBuilder.cpp
+@@ -95,7 +95,7 @@ OmxInfoBuilder::OmxInfoBuilder(bool allowSurfaceEncoders)
+ 
+ status_t OmxInfoBuilder::buildMediaCodecList(MediaCodecListWriter* writer) {
+     // Obtain IOmxStore
+-    sp<IOmxStore> omxStore = IOmxStore::getService();
++    sp<IOmxStore> omxStore = IOmxStore::tryGetService();
+     if (omxStore == nullptr) {
+         ALOGE("Cannot find an IOmxStore service.");
+         return NO_INIT;
+-- 
+2.43.0
+

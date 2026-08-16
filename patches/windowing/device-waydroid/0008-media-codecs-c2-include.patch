@@ -1,0 +1,29 @@
+From 787f3915a2a03489a7ad56094e992075c08b2244 Mon Sep 17 00:00:00 2001
+From: Avium <build@avium.local>
+Date: Sat, 15 Aug 2026 10:37:11 +0000
+Subject: [PATCH] waydroid: install media_codecs_c2.xml referenced by
+ media_codecs.xml
+
+configs/media_codecs.xml includes media_codecs_c2.xml but nothing installs
+that file, so the codec list parses empty and MediaCodec encoders (H.264)
+are unavailable, hanging UURemote at "initializing connection" and
+screenrecord. Ship the google C2 list under the referenced name.
+---
+ device.mk | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/device.mk b/device.mk
+index ce7cd20..8b7096f 100644
+--- a/device.mk
++++ b/device.mk
+@@ -216,6 +216,7 @@ PRODUCT_PACKAGES += \
+ # Media
+ PRODUCT_COPY_FILES += \
+     $(LOCAL_PATH)/configs/media_codecs.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs.xml \
++    frameworks/av/media/libstagefright/data/media_codecs_google_c2.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs_c2.xml \
+     $(LOCAL_PATH)/configs/media_profiles.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_profiles_V1_0.xml \
+     frameworks/av/media/libstagefright/data/media_codecs_google_c2.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs_google_c2.xml \
+     frameworks/av/media/libstagefright/data/media_codecs_google_c2_audio.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs_google_c2_audio.xml \
+-- 
+2.43.0
+

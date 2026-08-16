@@ -1,0 +1,33 @@
+From 38fcf04277f89a457dbe3cfa3046cd1a6a4db6d7 Mon Sep 17 00:00:00 2001
+From: Avium <build@avium.local>
+Date: Sat, 15 Aug 2026 08:08:19 +0000
+Subject: [PATCH] soong: anchor PWD strip in rustc_wrapper depfile
+ post-processing
+
+The unanchored global sed replaces every /build/ substring in the
+depfile, so with a workspace rooted at /build it mangles paths like
+out/soong/.intermediates/build/make/... into
+out/soong/.intermediatesmake/..., poisoning ninja deps and forcing
+aconfig+ART rebuilds on every build. Strip only the leading PWD prefix.
+
+Change-Id: If76fe991f84f41f63e4dd03f9cfea705e3124fbf
+---
+ scripts/rustc_wrapper.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/scripts/rustc_wrapper.sh b/scripts/rustc_wrapper.sh
+index 6a249243a..aa8aedaad 100644
+--- a/scripts/rustc_wrapper.sh
++++ b/scripts/rustc_wrapper.sh
+@@ -56,7 +56,7 @@ while [[ "$#" -gt 0 ]]; do
+ 
+                 # Absolute paths from include! macros (and similar) can cause a mismatch between
+                 # RBE and local dep info files, so strip out $ANDROID_BUILD_TOP
+-                sed -i -e "s|`pwd`/||g" $deps_file
++                sed -i -e "s|^`pwd`/||" $deps_file
+                 break
+             else
+               shift 2
+-- 
+2.43.0
+

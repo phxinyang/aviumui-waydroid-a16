@@ -1,0 +1,26 @@
+From aa907cc5123550bfede99dd3c33ef9fa1d796cb4 Mon Sep 17 00:00:00 2001
+From: root <root@avium-build.arch>
+Date: Sat, 15 Aug 2026 23:40:05 +0000
+Subject: [PATCH 6/8] v4l2_codec2: declare CPU_READ_OFTEN for encoder input
+ usage
+
+Change-Id: I15337734a99fe99093fc76c0907e30c54f5e15d4
+---
+ components/EncodeInterface.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/components/EncodeInterface.cpp b/components/EncodeInterface.cpp
+index e76f203..f252db3 100644
+--- a/components/EncodeInterface.cpp
++++ b/components/EncodeInterface.cpp
+@@ -318,7 +318,8 @@ void EncodeInterface::Initialize(const C2String& name, const SupportedCapabiliti
+ 
+     addParameter(DefineParam(mInputMemoryUsage, C2_PARAMKEY_INPUT_STREAM_USAGE)
+                          .withConstValue(new C2StreamUsageTuning::input(
+-                                 0u, static_cast<uint64_t>(BufferUsage::VIDEO_ENCODER)))
++                                 0u, static_cast<uint64_t>(BufferUsage::VIDEO_ENCODER |
++                                             BufferUsage::CPU_READ_OFTEN)))
+                          .build());
+ 
+     addParameter(
+

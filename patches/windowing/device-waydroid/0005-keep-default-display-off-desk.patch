@@ -1,0 +1,33 @@
+From daca8b06f5a616b6e57fd70f31ab74a72f441428 Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Thu, 13 Aug 2026 16:48:45 +0000
+Subject: [PATCH] waydroid: keep the default display off Avium-incompatible
+ Desk
+
+---
+ overlay-tablet/frameworks/base/core/res/res/values/config.xml | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/overlay-tablet/frameworks/base/core/res/res/values/config.xml b/overlay-tablet/frameworks/base/core/res/res/values/config.xml
+index ecf4630..2708b1a 100644
+--- a/overlay-tablet/frameworks/base/core/res/res/values/config.xml
++++ b/overlay-tablet/frameworks/base/core/res/res/values/config.xml
+@@ -19,7 +19,7 @@
+ 
+ <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+     <!-- Whether the current device's internal display can host desktop sessions.  -->
+-    <bool name="config_canInternalDisplayHostDesktops">true</bool>
++    <bool name="config_canInternalDisplayHostDesktops">false</bool>
+ 
+     <!-- Whether to enable glanceable hub features on this device. -->
+     <bool name="config_glanceableHubEnabled">true</bool>
+@@ -28,5 +28,5 @@
+     <bool name="config_glanceableHubEnabledByDefault">true</bool>
+ 
+     <!-- Whether desktop mode is supported on the current device  -->
+-    <bool name="config_isDesktopModeSupported">true</bool>
++    <bool name="config_isDesktopModeSupported">false</bool>
+ </resources>
+-- 
+2.43.0
+

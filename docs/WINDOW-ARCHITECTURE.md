@@ -9,14 +9,15 @@
 | 启动来源 | host-window token | 结果 |
 | --- | --- | --- |
 | Avium Launcher 或 Android 内部启动 | 无 | 默认 Android 全屏；同 task 导航不进入 Linux 独立窗口 |
-| Avium 手势、气泡、原生小窗 | 无，且使用 MiFreeform display | 保持 Avium/MiFreeform 原生小窗；Waydroid HWC 忽略该 display/task |
+| Avium 上滑悬停手势 | 无 | 官方 PopUp 101/102，同任务留在 display 0；系统白条/钉住菜单；HWC 不建 xdg 窗口 |
+| recents“自由窗口”、气泡 | 无，且使用 MiFreeform display | 保持 Avium/MiFreeform 三态；Waydroid HWC 忽略该 display/task |
 | Linux `.desktop` 或 Waydroid host app | 有，且只作用于本次 launch | ATMS/WMS 保存 host route，HWC 按明确 task ID 创建独立 `xdg_toplevel` |
 
 正式数据路径为 `Linux host launch -> WayDroidService -> A16 ATMS/WMS per-task state -> Task/TID surface -> Waydroid HWC -> Wayland xdg_toplevel -> compositor`。当前实现使用 descriptor 为 `com.avium.waydroid.launch.HOST_WINDOW` 的 launch cookie；WayDroidService 清除 Binder caller identity 后以 system UID 发起 freeform launch，ActivityStarter 同时验证 system UID 与 descriptor，再把 route 写入最终 leaf Task。Task 通过 `isWaydroidHostWindow` 写入 TaskInfo 与 task XML；同 task 导航继承，Android 跨 task launch 清除，进入真实非默认 display 时清除。
 
-默认 display（display 0）的完整 route 策略由 `ActivityStarter.updateWaydroidHostWindowRoute` 强制执行：trusted host launch 与同 task 导航保持 freeform 并留在 desk root；其余所有 Android 内部启动（无 trusted cookie 的跨 task launch）必须脱离 desk root、重挂到 TaskDisplayArea 并转 fullscreen，即使 host 窗口会话正在进行。这样 AviumUI 默认全屏与 Linux 独立窗口在同一条 display 上共存。非默认 display（Avium/MiFreeform）的窗口策略完全不动。
+默认 display（display 0）的完整 route 策略由 `ActivityStarter.updateWaydroidHostWindowRoute` 强制执行：trusted host launch 与同 task 导航保持 freeform 并留在 desk root；其余所有 Android 内部启动（无 trusted cookie 的跨 task launch）必须脱离 desk root、重挂到 TaskDisplayArea 并转 fullscreen，即使 host 窗口会话正在进行。官方 PopUp 101/102 保持 AviumUI 原算法；进入 101/102 时只清掉 leftover host 路由，避免套上 Linux 标题栏。非默认 display（Avium/MiFreeform）的窗口策略完全不动。
 
-WM Shell 只监听 TaskInfo 的 appeared/info-changed/vanished，并通过 `vendor.waydroid.window@1.3::setTaskWindowRoute` 发布 task ID、display、component、title 与 app-id。HWC 的 route map 是 external `xdg_toplevel` 的唯一分类依据；TID 只提供 task 身份，不决定来源。未 route 的 TID、Unscoped、MiFreeform 和 system layer 只进入显式 full-UI carrier。`waydroid.active_apps` 仅用于 full UI 生命周期提示，`waydroid.full_ui_active` 是独立 latch；它们不再充当 external task 集。
+WM Shell 只监听 TaskInfo 的 appeared/info-changed/vanished，并通过 `vendor.waydroid.window@1.3::setTaskWindowRoute` 发布 task ID、display、component、title 与 app-id。HWC 的 route map 是 external `xdg_toplevel` 的唯一分类依据；TID 只提供 task 身份，不决定来源。未 route 的 TID、Unscoped、MiFreeform 和 system layer 只进入显式 full-UI carrier。A16 SurfaceFlinger 常把未 route 的栈 client-compose 成单一 `HWC_FRAMEBUFFER_TARGET`；hybrid 在 `full_ui_requested` 且 carrier 本帧没有 overlay 内容时，把该 framebuffer 贴到 `Waydroid` xdg（hardware-waydroid 0004）。`waydroid.active_apps` 仅用于 full UI 生命周期提示，`waydroid.full_ui_active` 是独立 latch；它们不再充当 external task 集。
 
 ## 职责边界
 
@@ -25,13 +26,13 @@ WM Shell 只监听 TaskInfo 的 appeared/info-changed/vanished，并通过 `vend
 - HWC 只消费明确 task ID，组合对应 surface，管理 buffer fd、Wayland callback、configure/ack、retirement 和 primary-child ownership；不猜来源、不迁移 Avium task。
 - Linux compositor 管理外部窗口位置、焦点、最小化/最大化/恢复和关闭。
 - host configure 与 Android task 更新必须按 task ID 对应，并指定单一几何权威，避免双向反馈循环。
-- 使用 A16 正式 caption/task decoration layer；不继续维护自绘 GPU caption。
+- Linux host 窗口顶栏由 HWC 在 Android caption 条内直接 `xdg_toplevel_move` 拖动；GNOME/mutter 不提供 server-side decoration，因此不能依赖 `zxdg_decoration`。不重开 Desk，也不继续维护自绘 GPU caption。
 
 ## 正式补丁边界
 
 唯一 window recipe 是 [`patches/windowing/a16/series.json`](../patches/windowing/a16/series.json)，固定四个 project 的 base/expected tree 与每个 patch SHA-256。应用器 [`scripts/apply-a16-windowing-patches.py`](../scripts/apply-a16-windowing-patches.py) 先在临时 worktree 完整重放，再做 ff-only 更新；输入校验、check-only、完成态和失败恢复语义有隔离测试。locked replay 的 before/after 采集同时记录 commit HEAD 和 `HEAD^{tree}`：check-only 必须让基准 checkout 的两者保持不变且 tree 等于 `base_tree`，而临时 worktree 的重放结果由 `result.json` 中的 `expected_tree` 独立证明；[`scripts/verify-window-replay-evidence.py`](../scripts/verify-window-replay-evidence.py) 对这两个不同身份做机器检查。
 
-设备侧只保留 HAL 1.3 manifest patch。旧 `0000-waydroid-tablet-desktop-capability.patch` 会让 secondary/freeform display 全局 desktop-first，可能接管 MiFreeform，因此不在正式 series 中。host task 由可信 per-task route 的 `forceDesktop` 分支进入 desktop，无需该全局 overlay。旧顶层 `patches/windowing/frameworks-base/`、`hardware-waydroid/` 以及多代 Python patcher 均不是正式输入。
+设备侧保留 HAL 1.3 manifest，以及 `0005-keep-default-display-off-desk.patch`：默认屏不进 A16 Desk。旧 `0000-waydroid-tablet-desktop-capability.patch` 会让 secondary/freeform display 全局 desktop-first，可能接管 MiFreeform，因此不在正式 series 中。Linux host 窗口走 per-task host route；Desk 关闭后由 frameworks-base 0008 单独启动 host 桥。frameworks-base 0009 让 SystemUI 的 DesktopFirst 注册在无 Desk 时变成空操作，避免 KeyguardService 崩循环把图层藏掉。旧顶层 `patches/windowing/frameworks-base/`、`hardware-waydroid/` 以及多代 Python patcher 均不是正式输入。
 
 ## 保留与删除
 

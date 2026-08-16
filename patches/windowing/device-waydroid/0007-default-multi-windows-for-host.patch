@@ -1,0 +1,30 @@
+From 8d60a64bd904a1035a0613a6fdb74a0d2095df7c Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Fri, 14 Aug 2026 14:07:43 +0000
+Subject: [PATCH] waydroid: default multi_windows for Linux host xdg windows
+
+Clicking Waydroid still uses official full-UI via hardware-waydroid 0005.
+Single-window mode maximizes the host surface so GNOME cannot drag it.
+
+Change-Id: I0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c
+---
+ system.prop | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/system.prop b/system.prop
+index aa11ecf..96b525f 100644
+--- a/system.prop
++++ b/system.prop
+@@ -46,3 +46,9 @@ is_expressive_design_enabled=true
+ 
+ # AviumUI native mini gesture (swipe up and hold to enter mini window)
+ persist.avium.launchergesture=1
++
++# Linux host .desktop launches need hybrid per-task xdg windows.
++# Clicking Waydroid / active_apps=Waydroid still uses official full-UI
++# (hardware-waydroid 0005). Do not leave this false: single-window mode
++# maximizes the host surface and the GNOME title bar cannot move it.
++persist.waydroid.multi_windows=true
+-- 
+2.43.0
+

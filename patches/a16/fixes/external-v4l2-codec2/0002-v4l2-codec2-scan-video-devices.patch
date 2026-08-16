@@ -1,0 +1,30 @@
+From 1e5a598fb9e89796824782644f48690a48c68cb6 Mon Sep 17 00:00:00 2001
+From: Avium <build@avium.local>
+Date: Sat, 15 Aug 2026 18:23:48 +0000
+Subject: [PATCH 2/8] v4l2_codec2: scan all video devices so qcom-iris at
+ video17/18 is found
+
+The device scan only checked /dev/video0-9, missing the host qcom-iris
+decoder/encoder at /dev/video17/18, so the v4l2 components had no backing
+device and createInterface returned unusable components. Scan up to
+video31.
+
+Change-Id: I1ce4081da786a7c5dc2ae167e382b33762016795
+---
+ v4l2/V4L2Device.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/v4l2/V4L2Device.cpp b/v4l2/V4L2Device.cpp
+index bb020ba..ba3923e 100644
+--- a/v4l2/V4L2Device.cpp
++++ b/v4l2/V4L2Device.cpp
+@@ -2562,7 +2562,7 @@ const V4L2Device::DeviceInfos& V4L2Device::getDeviceInfosForType(V4L2Device::Typ
+     }
+ 
+     DeviceInfos deviceInfos;
+-    for (int i = 0; i < 10; ++i) {
++    for (int i = 0; i < 32; ++i) {
+         std::string path = base::StringPrintf("%s%d", kVideoDevicePattern, i);
+ 
+         scoped_refptr<V4L2Device> device = V4L2Device::create();
+

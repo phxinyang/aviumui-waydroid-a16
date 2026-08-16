@@ -1,0 +1,17 @@
+From 3a7654a4c0d1efb6cafd198393d61698e6b9263f Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Sun, 16 Aug 2026 01:26:37 +0000
+Subject: [PATCH] soong: mark rustc_wrapper executable
+
+Change-Id: I55ddd95d881e6765a3fbf91125ffa5eb705da7b0
+---
+ scripts/rustc_wrapper.sh | 0
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+ mode change 100644 => 100755 scripts/rustc_wrapper.sh
+
+diff --git a/scripts/rustc_wrapper.sh b/scripts/rustc_wrapper.sh
+old mode 100644
+new mode 100755
+-- 
+2.43.0
+

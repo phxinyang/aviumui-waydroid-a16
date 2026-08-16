@@ -55,7 +55,7 @@
     {
       "path": "hardware/waydroid",
       "base_tree": "62d1bbd926cc744ad8f080cfc91cbfdb9e915264",
-      "expected_tree": "5ad2e3b8f1a1ffde6783301dbb7be521e3eac0c5",
+      "expected_tree": "521b19a406972d772deae755e7517632c1773b1c",
       "patches": [
         {
           "path": "a16/hardware-waydroid/0001-framework-routed-hybrid-windows.patch",
@@ -92,6 +92,10 @@
         {
           "path": "a16/hardware-waydroid/0009-hwc-per-window-scale-caption-drag.patch",
           "sha256": "a4fb1aab7046d218bd055463fc7e139b202f01802645d786acc7d7907da6fb85"
+        },
+        {
+          "path": "a16/hardware-waydroid/0010-hwc-maximized-titlebar-restore.patch",
+          "sha256": "54f2b818f6101d0c5fe9a52360c31a016d2d14e20d2dbb79c46675d9b584681e"
         }
       ]
     },

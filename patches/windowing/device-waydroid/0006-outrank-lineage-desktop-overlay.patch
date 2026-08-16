@@ -1,0 +1,41 @@
+From 52cd4359a6092d3a29c660adc9f4206d2c9e5e6e Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Thu, 13 Aug 2026 17:16:07 +0000
+Subject: [PATCH] waydroid: outrank Lineage desktop overlay on the default
+ display
+
+---
+ device.mk                                                   | 3 +++
+ .../frameworks/base/core/res/res/values/config.xml          | 6 ++++++
+ 2 files changed, 9 insertions(+)
+ create mode 100644 overlay-avium-phone-window/frameworks/base/core/res/res/values/config.xml
+
+diff --git a/device.mk b/device.mk
+index b45fd20..ce7cd20 100644
+--- a/device.mk
++++ b/device.mk
+@@ -278,6 +278,9 @@ PRODUCT_COPY_FILES += \
+     $(LOCAL_PATH)/configs/wpa_supplicant.conf:$(TARGET_COPY_OUT_VENDOR)/etc/wifi/wpa_supplicant.conf
+ 
+ # Overlays
++# aapt searches PRODUCT overlays first. Lineage overlay/common sets
++# config_isDesktopModeSupported=true; put the Avium phone overlay first.
++PRODUCT_PACKAGE_OVERLAYS := $(LOCAL_PATH)/overlay-avium-phone-window $(PRODUCT_PACKAGE_OVERLAYS)
+ DEVICE_PACKAGE_OVERLAYS += \
+     $(LOCAL_PATH)/overlay \
+     $(LOCAL_PATH)/overlay-lineage
+diff --git a/overlay-avium-phone-window/frameworks/base/core/res/res/values/config.xml b/overlay-avium-phone-window/frameworks/base/core/res/res/values/config.xml
+new file mode 100644
+index 0000000..cdc9b5b
+--- /dev/null
++++ b/overlay-avium-phone-window/frameworks/base/core/res/res/values/config.xml
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <!-- AviumUI default display is phone-like fullscreen, not A16 Desk. -->
++    <bool name="config_canInternalDisplayHostDesktops">false</bool>
++    <bool name="config_isDesktopModeSupported">false</bool>
++</resources>
+-- 
+2.43.0
+

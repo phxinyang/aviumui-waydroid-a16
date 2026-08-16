@@ -1,0 +1,26 @@
+From f8649add451c0743e1d08eee531a8de1be2b7533 Mon Sep 17 00:00:00 2001
+From: root <root@avium-build.arch>
+Date: Sat, 15 Aug 2026 23:51:03 +0000
+Subject: [PATCH 7/8] v4l2_codec2: revert CPU_READ_OFTEN input usage (breaks
+ minigbm RGBA alloc)
+
+Change-Id: Ie5f1dbbb806b55626f7f243655776f278a6c256e
+---
+ components/EncodeInterface.cpp | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/components/EncodeInterface.cpp b/components/EncodeInterface.cpp
+index f252db3..e76f203 100644
+--- a/components/EncodeInterface.cpp
++++ b/components/EncodeInterface.cpp
+@@ -318,8 +318,7 @@ void EncodeInterface::Initialize(const C2String& name, const SupportedCapabiliti
+ 
+     addParameter(DefineParam(mInputMemoryUsage, C2_PARAMKEY_INPUT_STREAM_USAGE)
+                          .withConstValue(new C2StreamUsageTuning::input(
+-                                 0u, static_cast<uint64_t>(BufferUsage::VIDEO_ENCODER |
+-                                             BufferUsage::CPU_READ_OFTEN)))
++                                 0u, static_cast<uint64_t>(BufferUsage::VIDEO_ENCODER)))
+                          .build());
+ 
+     addParameter(
+

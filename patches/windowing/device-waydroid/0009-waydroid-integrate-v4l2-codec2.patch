@@ -1,0 +1,79 @@
+From 082b0a0de2816c58245b41b340d1bd4743ad46fe Mon Sep 17 00:00:00 2001
+From: Avium <build@avium.local>
+Date: Sat, 15 Aug 2026 15:09:43 +0000
+Subject: [PATCH 1/6] waydroid: integrate v4l2_codec2 with host qcom-iris
+ hardware codecs
+
+Install the v4l2 codec2 service and libc2plugin_store, and ship a
+media_codecs_c2.xml that keeps the google software C2 codecs while declaring
+c2.v4l2.avc.encoder/decoder backed by the host /dev/video18 iris encoder and
+/dev/video17 decoder. This gives Android real hardware MediaCodec components,
+unblocking UURemote (hardware-only encoder check) and screen recording.
+---
+ configs/media_codecs_c2.xml | 36 ++++++++++++++++++++++++++++++++++++
+ device.mk                   |  6 +++++-
+ 2 files changed, 41 insertions(+), 1 deletion(-)
+ create mode 100644 configs/media_codecs_c2.xml
+
+diff --git a/configs/media_codecs_c2.xml b/configs/media_codecs_c2.xml
+new file mode 100644
+index 0000000..5132b60
+--- /dev/null
++++ b/configs/media_codecs_c2.xml
+@@ -0,0 +1,36 @@
++<?xml version="1.0" encoding="utf-8" ?>
++<!--
++ * Codec2 component list installed as /vendor/etc/media_codecs_c2.xml.
++ *
++ * Keeps the google software C2 codecs (audio + video) so non-video paths
++ * keep working, and declares the V4L2-backed components provided by
++ * external/v4l2_codec2 + the host qcom-iris media device. The v4l2 AVC
++ * encoder/decoder give Android real hardware codecs, which UURemote's
++ * "hardware only" capability check accepts.
++-->
++<MediaCodecs>
++    <Include href="media_codecs_google_c2_audio.xml" />
++    <Include href="media_codecs_google_c2_video.xml" />
++    <Encoders>
++        <MediaCodec name="c2.v4l2.avc.encoder" type="video/avc">
++            <Limit name="size" min="32x32" max="1920x1088" />
++            <Limit name="alignment" value="2x2" />
++            <Limit name="block-size" value="16x16" />
++            <Limit name="blocks-per-second" range="1-244800" />
++            <Limit name="bitrate" range="1-12000000" />
++            <Limit name="concurrent-instances" max="8" />
++            <Limit name="performance-point-1280x720" range="30-30" />
++        </MediaCodec>
++    </Encoders>
++    <Decoders>
++        <MediaCodec name="c2.v4l2.avc.decoder" type="video/avc">
++            <Limit name="size" min="16x16" max="4096x4096" />
++            <Limit name="alignment" value="2x2" />
++            <Limit name="block-size" value="16x16" />
++            <Limit name="blocks-per-second" min="1" max="1879200" />
++            <Limit name="bitrate" range="1-62500000" />
++            <Limit name="concurrent-instances" max="8" />
++            <Limit name="performance-point-1920x1088" range="30-60" />
++        </MediaCodec>
++    </Decoders>
++</MediaCodecs>
+diff --git a/device.mk b/device.mk
+index 8b7096f..d4f802c 100644
+--- a/device.mk
++++ b/device.mk
+@@ -214,9 +214,13 @@ PRODUCT_PACKAGES += \
+     android.hardware.light@2.0-service.waydroid
+ 
+ # Media
++PRODUCT_PACKAGES += \
++    android.hardware.media.c2-service-v4l2 \
++    libc2plugin_store
++
+ PRODUCT_COPY_FILES += \
+     $(LOCAL_PATH)/configs/media_codecs.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs.xml \
+-    frameworks/av/media/libstagefright/data/media_codecs_google_c2.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs_c2.xml \
++    $(LOCAL_PATH)/configs/media_codecs_c2.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs_c2.xml \
+     $(LOCAL_PATH)/configs/media_profiles.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_profiles_V1_0.xml \
+     frameworks/av/media/libstagefright/data/media_codecs_google_c2.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs_google_c2.xml \
+     frameworks/av/media/libstagefright/data/media_codecs_google_c2_audio.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs_google_c2_audio.xml \
+

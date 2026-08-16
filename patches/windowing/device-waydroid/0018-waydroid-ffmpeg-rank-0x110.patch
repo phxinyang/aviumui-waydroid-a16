@@ -1,0 +1,23 @@
+From 3a4c841a0b0773da11c48d2ffc8dbd4961f105d1 Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Sun, 16 Aug 2026 03:25:52 +0000
+Subject: [PATCH] waydroid: prefer v4l2 hardware codecs over ffmpeg (rank
+ 0x110)
+
+---
+ device.mk | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/device.mk b/device.mk
+index 59befe8..c332cc6 100644
+--- a/device.mk
++++ b/device.mk
+@@ -254,7 +254,7 @@ PRODUCT_PACKAGES += \
+     android.hardware.media.c2-ffmpeg-service
+ 
+ PRODUCT_PROPERTY_OVERRIDES += \
+-    debug.ffmpeg-codec2.rank=0 \
++    debug.ffmpeg-codec2.rank=0x110 \
+     debug.ffmpeg-codec2.hwaccel.drm=0 \
+     debug.ffmpeg-codec2.pixel_format=RGBX_8888
+ 

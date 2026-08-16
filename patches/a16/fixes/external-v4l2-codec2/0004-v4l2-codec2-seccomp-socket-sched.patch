@@ -1,0 +1,28 @@
+From b5698ab232d0454f5c211e7b6ec6452891ea6ebd Mon Sep 17 00:00:00 2001
+From: root <root@avium-build.arch>
+Date: Sat, 15 Aug 2026 23:12:32 +0000
+Subject: [PATCH 4/8] v4l2_codec2: also allow
+ socket/connect/setsockopt/fcntl/sched_setscheduler
+
+Change-Id: Ib0caf08b8cd178ae4e5a6559ce59bd6886175caf
+---
+ service/android.hardware.media.c2-extended-seccomp_policy | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/service/android.hardware.media.c2-extended-seccomp_policy b/service/android.hardware.media.c2-extended-seccomp_policy
+index 734c53c..cac3a9f 100644
+--- a/service/android.hardware.media.c2-extended-seccomp_policy
++++ b/service/android.hardware.media.c2-extended-seccomp_policy
+@@ -10,5 +10,11 @@ uname: 1
+ kcmp: 1
+ sched_getaffinity: 1
+ sched_setaffinity: 1
++sched_setscheduler: 1
+ sysinfo: 1
+ mkdirat: 1
++socket: 1
++connect: 1
++setsockopt: 1
++getsockopt: 1
++fcntl: 1
+

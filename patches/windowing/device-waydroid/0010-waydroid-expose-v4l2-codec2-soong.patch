@@ -1,0 +1,23 @@
+From 6566fa964645a691b8031d7262e9f3b6a5d74d0e Mon Sep 17 00:00:00 2001
+From: Avium <build@avium.local>
+Date: Sat, 15 Aug 2026 15:17:32 +0000
+Subject: [PATCH 2/6] waydroid: expose external/v4l2_codec2 to the product
+ soong namespace
+
+---
+ device.mk | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/device.mk b/device.mk
+index d4f802c..43d227b 100644
+--- a/device.mk
++++ b/device.mk
+@@ -339,6 +339,7 @@ PRODUCT_PACKAGES += \
+ 
+ # Soong
+ PRODUCT_SOONG_NAMESPACES += \
++    external/v4l2_codec2 \
+     $(LOCAL_PATH)
+ 
+ # Binder IPC
+

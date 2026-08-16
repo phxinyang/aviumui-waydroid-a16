@@ -1,0 +1,250 @@
+From 9306331bf992cd0dafaccbac46a34a3fb83ca759 Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Sat, 15 Aug 2026 04:20:00 +0000
+Subject: [PATCH] hwcomposer: native host title-bar drag without Desk
+
+GNOME/mutter ignores zxdg_decoration and reports decorated=false, so
+host xdg_toplevel windows had no usable title-bar move while Desk stays
+off. Detect a left press inside the Android caption strip and call
+xdg_toplevel_move directly, without forwarding that press to Android.
+The remaining window keeps normal Android input semantics.
+---
+ hwcomposer/hwcomposer.cpp  |   6 ++-
+ hwcomposer/wayland-hwc.cpp | 100 +++++++++++++++++++++++++++++++++++--
+ hwcomposer/wayland-hwc.h   |   6 +++
+ 3 files changed, 107 insertions(+), 5 deletions(-)
+
+diff --git a/hwcomposer/hwcomposer.cpp b/hwcomposer/hwcomposer.cpp
+index 06cfec7..1f9a887 100644
+--- a/hwcomposer/hwcomposer.cpp
++++ b/hwcomposer/hwcomposer.cpp
+@@ -461,13 +461,15 @@ int apply_hwc_layer_to_window(waydroid_hwc_composer_device_1 *pdev, hwc_layer_1
+             pdev->display->layers[window_layer->surface] = {
+                     .x = hwc_layer->displayFrame.left,
+                     .y = hwc_layer->displayFrame.top,
+-                    .owner_task_id = window->taskID };
++                    .owner_task_id = window->taskID,
++                    .owner_window = window };
+         }
+         // Pointer/touch events may arrive on the parent transparent
+         // surface, so keep its Android-space origin in the same map.
+         pdev->display->layers[window->surface] = {
+                 .x = origin_x, .y = origin_y,
+-                .owner_task_id = window->taskID };
++                .owner_task_id = window->taskID,
++                .owner_window = window };
+     }
+ 
+     if (window->display->presentation) {
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+index 304f939..647d843 100644
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -533,7 +533,8 @@ void window::set_task_bounds(const hwc_rect_t &bounds) {
+         std::scoped_lock input_lock(display->input_state_mutex);
+         display->layers[surface] = {
+                 .x = task_left, .y = task_top,
+-                .owner_task_id = taskID };
++                .owner_task_id = taskID,
++                .owner_window = this };
+     }
+     last_task_resize_width = task_right - task_left;
+     last_task_resize_height = task_bottom - task_top;
+@@ -892,7 +893,8 @@ window::create(struct display *display, bool use_subsurfaces, std::string appID,
+         display->layers[window->surface] = {
+                 .x = window->task_bounds_valid ? window->task_left : 0,
+                 .y = window->task_bounds_valid ? window->task_top : 0,
+-                .owner_task_id = window->taskID };
++                .owner_task_id = window->taskID,
++                .owner_window = window.get() };
+     }
+     window->dedicated_background_surface = true;
+     window->bg_buffer = nullptr;
+@@ -1340,7 +1342,7 @@ static void gesture_swipe_end(struct display* display);
+ static void
+ pointer_handle_enter(void *data, struct wl_pointer *,
+                      uint32_t serial, struct wl_surface *surface,
+-                     wl_fixed_t, wl_fixed_t)
++                     wl_fixed_t sx, wl_fixed_t sy)
+ {
+     if (!surface) {
+         // The surface this enter event corresponds to was already destroyed
+@@ -1350,6 +1352,21 @@ pointer_handle_enter(void *data, struct wl_pointer *,
+     struct display *display = (struct display *)data;
+     display->pointer_surface = surface;
+     display->pointer_enter_serial = serial;
++    display->pointer_surface_y = wl_fixed_to_int(sy);
++    int x = wl_fixed_to_int(sx);
++    int y = wl_fixed_to_int(sy);
++    layerFrame input_frame;
++    {
++        std::scoped_lock input_lock(display->input_state_mutex);
++        auto it = display->layers.find(surface);
++        if (it != display->layers.end())
++            input_frame = it->second;
++    }
++    if (display->scale != 1) {
++        x = int(x * display->scale);
++        y = int(y * display->scale);
++    }
++    display->pointer_display_y = y + input_frame.y;
+     display->cursor_handler->on_cursor_enter(display);
+ }
+ 
+@@ -1359,6 +1376,8 @@ pointer_handle_leave(void *data, struct wl_pointer *,
+ {
+     struct display *display = (struct display *)data;
+     display->pointer_surface = NULL;
++    display->pointer_surface_y = -1;
++    display->pointer_display_y = -1;
+ }
+ 
+ static void
+@@ -1387,6 +1406,7 @@ pointer_handle_motion(void *data, struct wl_pointer *,
+         x = int(x * display->scale);
+         y = int(y * display->scale);
+     }
++    display->pointer_surface_y = wl_fixed_to_int(sy);
+     layerFrame input_frame;
+     {
+         std::scoped_lock input_lock(display->input_state_mutex);
+@@ -1396,6 +1416,7 @@ pointer_handle_motion(void *data, struct wl_pointer *,
+     }
+     x += input_frame.x;
+     y += input_frame.y;
++    display->pointer_display_y = y;
+ 
+     ADD_EVENT(EV_ABS, ABS_X, x);
+     ADD_EVENT(EV_ABS, ABS_Y, y);
+@@ -1471,6 +1492,22 @@ static bool send_pointer_button_to_android(struct display *display,
+     return true;
+ }
+ 
++static int host_caption_height_px(const struct display *display) {
++    int density = 180;
++    char property[PROPERTY_VALUE_MAX];
++    if (property_get("ro.sf.lcd_density", property, nullptr) > 0) {
++        const int parsed = atoi(property);
++        if (parsed > 0)
++            density = parsed;
++    }
++    // This A16 build enables tall desktop app headers, so the host caption
++    // is the 48dp variant. HWC works in Android display pixels, so the dp
++    // value is density-scaled. This is the same strip that Android draws as
++    // the host caption, now used as a native xdg_toplevel_move handle while
++    // Desk stays off.
++    return std::max(1, static_cast<int>(ceil(48.0 * (density / 160.0))));
++}
++
+ static void
+ pointer_handle_button(void *data, struct wl_pointer *,
+                       uint32_t serial, uint32_t, uint32_t button,
+@@ -1508,6 +1545,10 @@ pointer_handle_button(void *data, struct wl_pointer *,
+     } else if (!display->pointer_surface) {
+         return;
+     }
++    if (button == BTN_LEFT && state == WL_POINTER_BUTTON_STATE_PRESSED
++            && display->begin_host_titlebar_move(serial)) {
++        forward_to_android = false;
++    }
+     if (forward_to_android)
+         send_pointer_button_to_android(display, button, state);
+ }
+@@ -1980,6 +2021,59 @@ bool display::begin_task_window_drag(uint32_t task_id, uint32_t ctrl_type)
+     return true;
+ }
+ 
++bool display::begin_host_titlebar_move(uint32_t serial)
++{
++    if (!seat)
++        return false;
++
++    const int caption_height = host_caption_height_px(this);
++    std::scoped_lock input_lock(input_state_mutex);
++    if (!pointer_surface || pointer_display_y < 0)
++        return false;
++
++    const auto layer_it = layers.find(pointer_surface);
++    if (layer_it == layers.end() || !layer_it->second.owner_window)
++        return false;
++
++    window *target = layer_it->second.owner_window;
++    if (!target->xdg_toplevel || !target->task_bounds_valid)
++        return false;
++
++    // Only the top caption strip starts an xdg move. The rest of the
++    // host window keeps its Android input semantics, so buttons and app
++    // content remain unaffected.
++    if (pointer_display_y < target->task_top
++            || pointer_display_y >= target->task_top + caption_height) {
++        return false;
++    }
++
++    uint32_t task_id = 0;
++    if (!target->get_numeric_task_id(&task_id))
++        return false;
++
++    task_window_route route;
++    if (!get_task_window_route(task_id, &route) || !route.enabled)
++        return false;
++
++    // The press was already recorded by pointer_handle_button as an
++    // Android-owned pointer sequence. Claim it for Wayland and let the
++    // compositor own the interactive move.
++    if (!pointer_button_down || pointer_gesture_task_id != target->taskID
++            || pointer_sequence_owner != input_sequence_owner::Android) {
++        return false;
++    }
++    if (!active_gesture_task_id.empty())
++        return false;
++
++    pointer_sequence_owner = input_sequence_owner::Wayland;
++    active_gesture_task_id = target->taskID;
++    xdg_toplevel_move(target->xdg_toplevel, seat, serial);
++    ALOGI("TASK_XDG_GESTURE task=%u serial=%u input=pointer aosp_ctrl=0 "
++            "api=move edge=0 accepted=1 reason=host-title-strip",
++            task_id, serial);
++    return true;
++}
++
+ static void
+ touch_handle_shape(void *data, struct wl_touch *, int32_t id, wl_fixed_t major, wl_fixed_t minor)
+ {
+diff --git a/hwcomposer/wayland-hwc.h b/hwcomposer/wayland-hwc.h
+index fb0cbf7..b57bc21 100644
+--- a/hwcomposer/wayland-hwc.h
++++ b/hwcomposer/wayland-hwc.h
+@@ -94,10 +94,13 @@ enum class GrallocType {
+ 
+ #define MAX_TOUCHPOINTS 10
+ 
++struct window;
++
+ struct layerFrame {
+     int x = 0;
+     int y = 0;
+     std::string owner_task_id;
++    struct window *owner_window = nullptr;
+ };
+ 
+ enum class input_sequence_owner {
+@@ -516,6 +519,8 @@ struct display {
+ 
+     std::map<int, struct wl_surface *> touch_surfaces;
+     struct wl_surface *pointer_surface;
++    int pointer_surface_y = -1;
++    int pointer_display_y = -1;
+     struct wl_surface *tablet_surface;
+     std::list<struct zwp_tablet_tool_v2 *> tablet_tools;
+     std::map<struct zwp_tablet_tool_v2 *, uint16_t> tablet_tools_evt;
+@@ -583,6 +588,7 @@ struct display {
+     void start_task_command_worker();
+     void stop_task_command_worker();
+     bool begin_task_window_drag(uint32_t task_id, uint32_t ctrl_type);
++    bool begin_host_titlebar_move(uint32_t serial);
+     uint64_t enqueue_task_focus(uint32_t task_id);
+     uint64_t enqueue_task_remove(uint32_t task_id);
+     uint64_t enqueue_task_resize(uint32_t task_id, int32_t left,
+-- 
+2.43.0
+

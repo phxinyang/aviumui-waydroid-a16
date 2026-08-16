@@ -1,19 +1,21 @@
-From b449cc883333e7bc59c819dc6c5c5a2e741a3e6a Mon Sep 17 00:00:00 2001
+From b449cc883333e7bc59c819dc6c5c5a2e7413e6a Mon Sep 17 00:00:00 2001
 From: SupeChicken666 <me@supechicken666.dev>
 Date: Sun, 18 Jan 2026 13:02:21 +0000
-Subject: [PATCH 2/3] health: Drop CAP_WAKE_ALARM
+Subject: [PATCH] health: drop capabilities incompatible with Waydroid
 
-Change-Id: Ic558010a83f17207ef8cf60b2cdc89f28983c2d7
-Signed-off-by: SupeChicken666 <me@supechicken666.dev>
+The health service runs in the Waydroid container, where Android init
+deliberately drops privileged capabilities.  The charger service must not
+request CAP_SYS_BOOT, otherwise init aborts service setup before zygote.
+
 ---
- health/aidl/default/android.hardware.health-service.example.rc | 2 +-
- 1 file changed, 1 insertion(+), 1 deletion(-)
+ health/aidl/default/android.hardware.health-service.example.rc | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
 
 diff --git a/health/aidl/default/android.hardware.health-service.example.rc b/health/aidl/default/android.hardware.health-service.example.rc
-index e052024..0e99c47 100644
+index e052024..0000000 100644
 --- a/health/aidl/default/android.hardware.health-service.example.rc
 +++ b/health/aidl/default/android.hardware.health-service.example.rc
-@@ -2,7 +2,7 @@ service vendor.health-default /vendor/bin/hw/android.hardware.health-service.exa
+@@ -2,7 +2,7 @@ service vendor.health-default /vendor/bin/hw/android.hardware.health-service.example
      class hal
      user system
      group system
@@ -22,6 +24,13 @@ index e052024..0e99c47 100644
      file /dev/kmsg w
  
  service vendor.charger /vendor/bin/hw/android.hardware.health-service.example --charger
+@@ -21,7 +21,6 @@ service vendor.charger /vendor/bin/hw/android.hardware.health-service.example --charger
+     seclabel u:r:charger_vendor:s0
+     user system
+     group system wakelock input
+-    capabilities SYS_BOOT
+     file /dev/kmsg w
+     file /sys/fs/pstore/console-ramoops-0 r
+     file /sys/fs/pstore/console-ramoops r
 -- 
 2.55.0
-

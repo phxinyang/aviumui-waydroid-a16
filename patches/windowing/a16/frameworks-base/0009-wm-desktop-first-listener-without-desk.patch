@@ -1,0 +1,42 @@
+From 65f45f2a3e4904c2786f593470ff1bc0155e8dd1 Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Fri, 14 Aug 2026 10:04:51 +0000
+Subject: [PATCH] wm: no-op DesktopFirst listener when Desk is off
+
+Change-Id: I7373367fbc6228937424b24dbc984f99d214aee6
+---
+ .../wm/shell/desktopmode/DesktopTasksController.kt    | 11 +++++------
+ 1 file changed, 5 insertions(+), 6 deletions(-)
+
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt
+index 93dda84a3979..ac9be19c8950 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt
+@@ -6607,9 +6607,10 @@ class DesktopTasksController(
+         override fun registerDesktopFirstListener(listener: DesktopFirstListener) {
+             logV("registerDesktopFirstListener")
+             if (desktopFirstListenerManager.isEmpty) {
+-                throw UnsupportedOperationException(
+-                    "DesktopFirstListenerManager is not available on this device"
+-                )
++                // Default display is off Desk. SystemUI still constructs
++                // DesktopFirstRepository and registers here; throwing kills
++                // KeyguardService and hides every app layer.
++                return
+             }
+             mainExecutor.execute { desktopFirstListenerManager.get().registerListener(listener) }
+         }
+@@ -6617,9 +6618,7 @@ class DesktopTasksController(
+         override fun unregisterDesktopFirstListener(listener: DesktopFirstListener) {
+             logV("unregisterDesktopFirstListener")
+             if (desktopFirstListenerManager.isEmpty) {
+-                throw UnsupportedOperationException(
+-                    "DesktopFirstListenerManager is not available on this device"
+-                )
++                return
+             }
+             mainExecutor.execute { desktopFirstListenerManager.get().unregisterListener(listener) }
+         }
+-- 
+2.43.0
+

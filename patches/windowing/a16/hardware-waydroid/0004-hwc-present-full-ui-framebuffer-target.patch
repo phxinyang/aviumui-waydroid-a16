@@ -1,0 +1,77 @@
+From a7c52f4dc42fee65e02f4485e1e86fc0bd0bb96d Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Fri, 14 Aug 2026 16:20:00 +0000
+Subject: [PATCH] hwcomposer: present SF framebuffer on the full-UI carrier
+
+A16 SurfaceFlinger client-composes the default display. Hybrid
+multi-window still marked every layer HWC_OVERLAY in prepare, so SF
+left FRAMEBUFFER_TARGET empty and set() only delivered that black
+target. Clicking Waydroid then created an xdg_toplevel with no pixels.
+
+When full UI is requested, leave unrouted layers as HWC_FRAMEBUFFER so
+SF fills the target, then attach that buffer to the Waydroid carrier.
+Host-routed overlay windows stay overlay.
+---
+ hwcomposer/modes/multi-window.cpp | 26 +++++++++++++++++++++++++-
+ hwcomposer/modes/multi-window.h   |  1 +
+ 2 files changed, 26 insertions(+), 1 deletion(-)
+
+diff --git a/hwcomposer/modes/multi-window.cpp b/hwcomposer/modes/multi-window.cpp
+index 4aedfb3..24c121a 100644
+--- a/hwcomposer/modes/multi-window.cpp
++++ b/hwcomposer/modes/multi-window.cpp
+@@ -131,7 +131,19 @@ bool multi_window_mode::can_handle_layer(const hwc_layer_1& layer) {
+     return layer.compositionType == HWC_OVERLAY && !(layer.flags & HWC_SKIP_LAYER);
+ }
+ 
+-int multi_window_mode::prepare(hwc_layer_1* hwc_layer, size_t) {
++int multi_window_mode::setup_prepare(waydroid_hwc_composer_device_1 *pdev,
++        hwc_display_contents_1_t *contents) {
++    layer_infos.setup(pdev, contents->hwLayers, contents->numHwLayers);
++    task_routes = pdev->display->get_task_window_routes();
++    full_ui_requested = pdev->display->is_full_ui_requested();
++    return 0;
++}
++
++int multi_window_mode::prepare(hwc_layer_1* hwc_layer, size_t i) {
++    if (full_ui_requested && !get_route(layer_infos[i], nullptr)) {
++        hwc_layer->compositionType = HWC_FRAMEBUFFER;
++        return 0;
++    }
+     if (hwc_layer->compositionType == HWC_FRAMEBUFFER) {
+         hwc_layer->compositionType = HWC_OVERLAY;
+     }
+@@ -198,6 +210,18 @@ int multi_window_mode::cleanup_stale_windows(waydroid_hwc_composer_device_1* pde
+ 
+ int multi_window_mode::handle_layer(waydroid_hwc_composer_device_1* pdev, hwc_layer_1* hwc_layer, size_t i) {
+     if (!can_handle_layer(*hwc_layer)) {
++        // A16 SF often client-composes the unrouted stack and only
++        // submits FRAMEBUFFER_TARGET. Official full-UI mode presents
++        // that buffer on the Waydroid carrier; hybrid must do the same
++        // or show-full-ui never creates an xdg_toplevel.
++        if (full_ui_requested
++                && hwc_layer->compositionType == HWC_FRAMEBUFFER_TARGET
++                && hwc_layer->handle) {
++            window *carrier = get_full_ui_window(pdev);
++            if (carrier && carrier->lastLayer == 0)
++                return apply_hwc_layer_to_window(pdev, hwc_layer, i, carrier,
++                        false);
++        }
+         if (!(hwc_layer->flags & HWC_SKIP_LAYER) && hwc_layer->compositionType != HWC_FRAMEBUFFER_TARGET) {
+             // TODO: Support HWC_BACKGROUND
+             ALOGW("Encountered unsupported compositionType: %" PRId32, hwc_layer->compositionType);
+diff --git a/hwcomposer/modes/multi-window.h b/hwcomposer/modes/multi-window.h
+index 7dd38d3..651c24f 100644
+--- a/hwcomposer/modes/multi-window.h
++++ b/hwcomposer/modes/multi-window.h
+@@ -42,6 +42,7 @@ class multi_window_mode : public waydroid_mode {
+     static bool can_handle_layer(const hwc_layer_1& layer);
+ 
+   public:
++    int setup_prepare(waydroid_hwc_composer_device_1 *pdev, hwc_display_contents_1_t *contents) override;
+     int prepare(hwc_layer_1 *, size_t) override;
+ 
+     int setup_set(waydroid_hwc_composer_device_1 *pdev, hwc_display_contents_1_t *contents) final;
+-- 
+2.43.0
+

@@ -1,0 +1,47 @@
+From ff1d1daafea879e2916ec1166c7d0fe328e936fe Mon Sep 17 00:00:00 2001
+From: root <root@avium-build.arch>
+Date: Sat, 15 Aug 2026 23:59:00 +0000
+Subject: [PATCH 8/8] v4l2_codec2: tolerate missing FORCE_KEY_FRAME, fall back
+ to H264_I_PERIOD
+
+Change-Id: I734a9f2cf55f014f852f36b8e945d6e14f1af768
+---
+ v4l2/V4L2Encoder.cpp | 16 ++++++++++++----
+ 1 file changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/v4l2/V4L2Encoder.cpp b/v4l2/V4L2Encoder.cpp
+index 730827c..3c0cffe 100644
+--- a/v4l2/V4L2Encoder.cpp
++++ b/v4l2/V4L2Encoder.cpp
+@@ -316,9 +316,10 @@ void V4L2Encoder::handleEncodeRequest() {
+     if (mKeyFrameCounter == 0) {
+         if (!mDevice->setExtCtrls(V4L2_CTRL_CLASS_MPEG,
+                                   {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME)})) {
+-            ALOGE("Failed requesting key frame");
+-            onError();
+-            return;
++            // Some encoders (e.g. the qcom iris driver in this kernel release)
++            // do not implement FORCE_KEY_FRAME. Keep encoding and rely on the
++            // driver's periodic GOP behavior instead of failing the session.
++            ALOGW("Failed requesting key frame; continuing with driver default GOP");
+         }
+     }
+     mKeyFrameCounter = (mKeyFrameCounter + 1) % mKeyFramePeriod;
+@@ -603,9 +604,16 @@ bool V4L2Encoder::configureDevice(C2Config::profile_t outputProfile,
+ 
+     // Additional optional controls:
+     // - Enable macroblock-level bitrate control.
+-    // - Set GOP length to 0 to disable periodic key frames.
++    // - Set GOP length to 0 to disable periodic key frames (they are requested
++    //   explicitly through FORCE_KEY_FRAME). If the device does not expose
++    //   GOP_SIZE (e.g. qcom iris in this kernel release), fall back to the
++    //   H.264 I-frame period control so the stream still gets key frames.
+     mDevice->setExtCtrls(V4L2_CTRL_CLASS_MPEG, {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_MB_RC_ENABLE, 1),
+                                                 V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_GOP_SIZE, 0)});
++    if (!mDevice->isCtrlExposed(V4L2_CID_MPEG_VIDEO_GOP_SIZE)) {
++        mDevice->setExtCtrls(V4L2_CTRL_CLASS_MPEG,
++                             {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_H264_I_PERIOD, mKeyFramePeriod)});
++    }
+ 
+     // All controls below are H.264-specific, so we can return here if the profile is not H.264.
+     if (outputProfile >= C2Config::PROFILE_AVC_BASELINE &&

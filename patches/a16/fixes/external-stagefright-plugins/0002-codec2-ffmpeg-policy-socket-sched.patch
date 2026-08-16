@@ -1,0 +1,30 @@
+From b08ae71d0152a1fb404fa4cc7b494106ca6b88b9 Mon Sep 17 00:00:00 2001
+From: root <root@avium-build.arch>
+Date: Sat, 15 Aug 2026 23:12:32 +0000
+Subject: [PATCH 2/3] codec2: ffmpeg extended policy: uname/socket/fcntl/sched
+ syscalls
+
+---
+ .../android.hardware.media.c2-ffmpeg-extended.policy  | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/codec2/seccomp_policy/android.hardware.media.c2-ffmpeg-extended.policy b/codec2/seccomp_policy/android.hardware.media.c2-ffmpeg-extended.policy
+index 08f1f27..c42fd30 100644
+--- a/codec2/seccomp_policy/android.hardware.media.c2-ffmpeg-extended.policy
++++ b/codec2/seccomp_policy/android.hardware.media.c2-ffmpeg-extended.policy
+@@ -3,3 +3,14 @@
+ # libavutil's CPU detection calls uname() on aarch64 (observed SIGSYS on
+ # __NR_uname while starting the HEVC decoder thread).
+ uname: 1
++kcmp: 1
++sched_getaffinity: 1
++sched_setaffinity: 1
++sched_setscheduler: 1
++sysinfo: 1
++mkdirat: 1
++socket: 1
++connect: 1
++setsockopt: 1
++getsockopt: 1
++fcntl: 1
+

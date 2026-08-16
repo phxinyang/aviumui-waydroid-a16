@@ -1,0 +1,41 @@
+From 7ef58397c14531dd9758501e83c222688379bf9c Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Sun, 16 Aug 2026 01:32:31 +0000
+Subject: [PATCH] waydroid: enable v4l2 HEVC hardware decoder (qcom-iris)
+
+---
+ configs/media_codecs_c2.xml | 9 +++++++++
+ device.mk                   | 1 +
+ 2 files changed, 10 insertions(+)
+
+diff --git a/configs/media_codecs_c2.xml b/configs/media_codecs_c2.xml
+index 54351de..ef39c41 100644
+--- a/configs/media_codecs_c2.xml
++++ b/configs/media_codecs_c2.xml
+@@ -32,5 +32,14 @@
+             <Limit name="concurrent-instances" max="8" />
+             <Limit name="performance-point-1920x1088" range="30-60" />
+         </MediaCodec>
++        <MediaCodec name="c2.v4l2.hevc.decoder" type="video/hevc">
++            <Limit name="size" min="16x16" max="4096x4096" />
++            <Limit name="alignment" value="2x2" />
++            <Limit name="block-size" value="16x16" />
++            <Limit name="blocks-per-second" min="1" max="1879200" />
++            <Limit name="bitrate" range="1-62500000" />
++            <Limit name="concurrent-instances" max="8" />
++            <Limit name="performance-point-1920x1088" range="30-60" />
++        </MediaCodec>
+     </Decoders>
+ </MediaCodecs>
+diff --git a/device.mk b/device.mk
+index 20bafad..2cbeee3 100644
+--- a/device.mk
++++ b/device.mk
+@@ -222,6 +222,7 @@ PRODUCT_PROPERTY_OVERRIDES += \
+     media.c2.hal.selection=aidl \
+     ro.vendor.v4l2_codec2.encoder.supported.h264=true \
+     ro.vendor.v4l2_codec2.decoder.supported.h264=true \
++    ro.vendor.v4l2_codec2.decoder.supported.hevc=true \
+     persist.wm.debug.desktop_veiled_resizing=false
+ 
+ PRODUCT_COPY_FILES += \

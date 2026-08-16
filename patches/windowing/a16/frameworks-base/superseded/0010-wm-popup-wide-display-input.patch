@@ -1,0 +1,76 @@
+From d595cb8249c89fdaad126359008fc84e1536c962 Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Fri, 14 Aug 2026 14:07:43 +0000
+Subject: [PATCH] wm: feed official Avium PopUp a wide leftover
+
+Waydroid tablets report ROTATION_0 with width greater than height.
+Official leftover crop stays portrait if the previous 101 leftover
+is portrait. Feed the current display rect only. Do not remap
+rotation: ROTATION_90 stands the official white bar on its side.
+
+Change-Id: I9a0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c
+---
+ .../com/android/server/wm/ActivityStarter.java  | 11 +++++++++++
+ .../server/wm/PopUpWindowController.java        | 17 +++++++++++++++++
+ 2 files changed, 28 insertions(+)
+
+diff --git a/services/core/java/com/android/server/wm/ActivityStarter.java b/services/core/java/com/android/server/wm/ActivityStarter.java
+index 62fd493f6d33..fe01e948a5fc 100644
+--- a/services/core/java/com/android/server/wm/ActivityStarter.java
++++ b/services/core/java/com/android/server/wm/ActivityStarter.java
+@@ -2008,6 +2008,17 @@ class ActivityStarter {
+             // Drop any leftover host route so the scaled mini is not wrapped
+             // in a Linux xdg title bar.
+             task.setWaydroidHostWindow(false);
++            // Official getPopUpViewDefalutBounds crops leftover aspect to
++            // 9:16. A previous portrait leftover on a wide Waydroid display
++            // stays portrait; feed the current display rect instead.
++            if (task.getDisplayContent() != null) {
++                final android.graphics.Rect displayBound = new android.graphics.Rect();
++                task.getDisplayContent().getBounds(displayBound);
++                if (displayBound.width() > displayBound.height()) {
++                    task.setLastNonFullscreenBounds(displayBound);
++                    task.setBounds(displayBound);
++                }
++            }
+             return;
+         }
+         if (launchMode == WINDOWING_MODE_FREEFORM
+diff --git a/services/core/java/com/android/server/wm/PopUpWindowController.java b/services/core/java/com/android/server/wm/PopUpWindowController.java
+index 897b3e9762d6..81df31781182 100644
+--- a/services/core/java/com/android/server/wm/PopUpWindowController.java
++++ b/services/core/java/com/android/server/wm/PopUpWindowController.java
+@@ -660,6 +660,16 @@ public class PopUpWindowController {
+             }
+             final Rect bounds = new Rect();
+             rootTask.getBounds(bounds);
++            // Wide Waydroid leftover is often a leftover portrait 9:16
++            // from the previous 101. Official crop keeps that portrait
++            // card; feed the current display rect instead.
++            if (rootTask.mDisplayContent != null) {
++                final Rect displayLeftover = new Rect();
++                rootTask.mDisplayContent.getBounds(displayLeftover);
++                if (displayLeftover.width() > displayLeftover.height()) {
++                    bounds.set(displayLeftover);
++                }
++            }
+             WindowResizingAlgorithm.getPopUpViewDefalutBounds(bounds);
+             rootTask.setAlwaysOnTop(true);
+             rootTask.setBounds(bounds);
+@@ -895,6 +905,13 @@ public class PopUpWindowController {
+                     surfaceInfo.resetWindowBoundaryGapToOrigin();
+                 }
+                 rootTask.getBounds(bounds);
++                if (rootTask.mDisplayContent != null) {
++                    final Rect displayLeftover = new Rect();
++                    rootTask.mDisplayContent.getBounds(displayLeftover);
++                    if (displayLeftover.width() > displayLeftover.height()) {
++                        bounds.set(displayLeftover);
++                    }
++                }
+                 WindowResizingAlgorithm.getPopUpViewDefalutBounds(bounds);
+                 rootTask.setAlwaysOnTop(true);
+                 rootTask.setBounds(bounds);
+-- 
+2.43.0
+

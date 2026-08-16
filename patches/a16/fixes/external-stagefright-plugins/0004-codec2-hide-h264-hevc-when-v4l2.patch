@@ -1,0 +1,31 @@
+From 98c840090acc8a836e7d502dbc488f010e9633b3 Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Sun, 16 Aug 2026 03:25:42 +0000
+Subject: [PATCH] codec2: hide ffmpeg h264/hevc decoders when v4l2
+ hardware-video is on
+
+---
+ codec2/service.cpp | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/codec2/service.cpp b/codec2/service.cpp
+index 8dad451..a50ed34 100644
+--- a/codec2/service.cpp
++++ b/codec2/service.cpp
+@@ -123,6 +123,16 @@ static const std::string kCheckVaapiCodecs[] = {
+ static bool shouldEnableCodec(const std::string codec) {
+     using namespace ::android;
+ 
++    // On builds where the v4l2/qcom-iris hardware codec2 components are
++    // enabled, hide ffmpeg's software H.264/HEVC decoders so MediaCodec and
++    // apps that enumerate "hardware" codecs actually land on the hardware
++    // path. Other codecs (audio, divx/mpeg/vp8/vp9/av1, ...) keep the ffmpeg
++    // fallback.
++    if (::android::base::GetBoolProperty("ro.vendor.v4l2_codec2.hardware-video", false) &&
++        (codec == "c2.ffmpeg.h264.decoder" || codec == "c2.ffmpeg.hevc.decoder")) {
++        return false;
++    }
++
+     const bool force_hwaccel_codec = ::android::base::GetBoolProperty("debug.ffmpeg-codec2.hwaccel.force", false),
+                codec_supported_by_gpu = C2FFMPEGVideoUtils().shouldEnableCodec(codec, false);
+ 

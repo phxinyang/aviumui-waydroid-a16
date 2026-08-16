@@ -1,0 +1,29 @@
+From c36a9749d96a618aea8dd813640073ec2ff2c1e9 Mon Sep 17 00:00:00 2001
+From: root <root@avium-build.arch>
+Date: Sat, 15 Aug 2026 23:19:38 +0000
+Subject: [PATCH 3/3] codec2: ffmpeg extended policy: eventfd/recvfrom/looper
+ syscalls
+
+---
+ .../android.hardware.media.c2-ffmpeg-extended.policy  | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/codec2/seccomp_policy/android.hardware.media.c2-ffmpeg-extended.policy b/codec2/seccomp_policy/android.hardware.media.c2-ffmpeg-extended.policy
+index c42fd30..9e1ebf9 100644
+--- a/codec2/seccomp_policy/android.hardware.media.c2-ffmpeg-extended.policy
++++ b/codec2/seccomp_policy/android.hardware.media.c2-ffmpeg-extended.policy
+@@ -14,3 +14,14 @@ connect: 1
+ setsockopt: 1
+ getsockopt: 1
+ fcntl: 1
++eventfd2: 1
++recvfrom: 1
++sendto: 1
++sendmsg: 1
++poll: 1
++epoll_create1: 1
++epoll_ctl: 1
++epoll_wait: 1
++timerfd_create: 1
++timerfd_settime: 1
++clock_nanosleep: 1

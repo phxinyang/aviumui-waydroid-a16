@@ -1,0 +1,24 @@
+From 69939c3cd6c345179acd1320c5812c527825d1fb Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Sun, 16 Aug 2026 02:50:59 +0000
+Subject: [PATCH] v4l2_codec2: decoder input S_FMT must use 0x0 not ui::Size()
+ default (-1,-1)
+
+Change-Id: I82b6c10b9bbbf1b24cdd98b900b50ec7af896c3d
+---
+ v4l2/V4L2Decoder.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/v4l2/V4L2Decoder.cpp b/v4l2/V4L2Decoder.cpp
+index 09799eb..a588a1c 100644
+--- a/v4l2/V4L2Decoder.cpp
++++ b/v4l2/V4L2Decoder.cpp
+@@ -202,7 +202,7 @@ bool V4L2Decoder::setupInputFormat(const uint32_t inputPixelFormat, const size_t
+     }
+ 
+     // Setup the input format.
+-    auto format = mInputQueue->setFormat(inputPixelFormat, ui::Size(), inputBufferSize, 0);
++    auto format = mInputQueue->setFormat(inputPixelFormat, ui::Size(0, 0), inputBufferSize, 0);
+     if (!format) {
+         ALOGE("Failed to call IOCTL to set input format.");
+         return false;

@@ -1,0 +1,22 @@
+From a52677ca76fb2ba1ca888969bd66e60e315883c8 Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Sun, 16 Aug 2026 03:25:42 +0000
+Subject: [PATCH] waydroid: prefer v4l2 hardware video on 8gen2 (hide ffmpeg
+ h264/hevc)
+
+---
+ device.mk | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/device.mk b/device.mk
+index 2cbeee3..59befe8 100644
+--- a/device.mk
++++ b/device.mk
+@@ -223,6 +223,7 @@ PRODUCT_PROPERTY_OVERRIDES += \
+     ro.vendor.v4l2_codec2.encoder.supported.h264=true \
+     ro.vendor.v4l2_codec2.decoder.supported.h264=true \
+     ro.vendor.v4l2_codec2.decoder.supported.hevc=true \
++    ro.vendor.v4l2_codec2.hardware-video=true \
+     persist.wm.debug.desktop_veiled_resizing=false
+ 
+ PRODUCT_COPY_FILES += \

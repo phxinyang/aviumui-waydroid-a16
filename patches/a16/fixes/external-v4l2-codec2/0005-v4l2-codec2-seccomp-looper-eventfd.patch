@@ -1,0 +1,31 @@
+From c302af83070122edc98f650c2554f2016d8ae46d Mon Sep 17 00:00:00 2001
+From: root <root@avium-build.arch>
+Date: Sat, 15 Aug 2026 23:19:38 +0000
+Subject: [PATCH 5/8] v4l2_codec2: allow eventfd2/recvfrom and looper socket
+ syscalls
+
+Change-Id: Ifecd3f3e43464501b9afb37067c3138eaf54e8d9
+---
+ .../android.hardware.media.c2-extended-seccomp_policy | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/service/android.hardware.media.c2-extended-seccomp_policy b/service/android.hardware.media.c2-extended-seccomp_policy
+index cac3a9f..46802a9 100644
+--- a/service/android.hardware.media.c2-extended-seccomp_policy
++++ b/service/android.hardware.media.c2-extended-seccomp_policy
+@@ -18,3 +18,14 @@ connect: 1
+ setsockopt: 1
+ getsockopt: 1
+ fcntl: 1
++eventfd2: 1
++recvfrom: 1
++sendto: 1
++sendmsg: 1
++poll: 1
++epoll_create1: 1
++epoll_ctl: 1
++epoll_wait: 1
++timerfd_create: 1
++timerfd_settime: 1
++clock_nanosleep: 1
+

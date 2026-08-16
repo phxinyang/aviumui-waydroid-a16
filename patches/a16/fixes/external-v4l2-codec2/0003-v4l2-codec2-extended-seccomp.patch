@@ -1,0 +1,90 @@
+From 5805a17f279f5b0337de7f050c251b7501a75faa Mon Sep 17 00:00:00 2001
+From: root <root@avium-build.arch>
+Date: Sat, 15 Aug 2026 22:50:06 +0000
+Subject: [PATCH 3/8] v4l2_codec2: extended seccomp policy (uname/mesa
+ syscalls) and AVC 5.2/6 levels
+
+Change-Id: I7709139e1c373124df5d3278d1db8607933ef5f3
+---
+ common/include/v4l2_codec2/common/H264.h           |  3 +++
+ components/EncodeInterface.cpp                     |  4 +++-
+ service/Android.bp                                 | 10 +++++++++-
+ ...droid.hardware.media.c2-extended-seccomp_policy | 14 ++++++++++++++
+ 4 files changed, 29 insertions(+), 2 deletions(-)
+ create mode 100644 service/android.hardware.media.c2-extended-seccomp_policy
+
+diff --git a/common/include/v4l2_codec2/common/H264.h b/common/include/v4l2_codec2/common/H264.h
+index 18770ef..0e5ca22 100644
+--- a/common/include/v4l2_codec2/common/H264.h
++++ b/common/include/v4l2_codec2/common/H264.h
+@@ -37,6 +37,9 @@ constexpr H264LevelLimits kH264Limits[] = {
+         {C2Config::LEVEL_AVC_5, 589824, 22080, 135000000},
+         {C2Config::LEVEL_AVC_5_1, 983040, 36864, 240000000},
+         {C2Config::LEVEL_AVC_5_2, 2073600, 36864, 240000000},
++        {C2Config::LEVEL_AVC_6, 4177920, 139264, 240000000},
++        {C2Config::LEVEL_AVC_6_1, 8355840, 139264, 240000000},
++        {C2Config::LEVEL_AVC_6_2, 16711680, 139264, 240000000},
+ };
+ 
+ uint32_t maxFramerateForLevelH264(C2Config::level_t level, const ui::Size& videoSize);
+diff --git a/components/EncodeInterface.cpp b/components/EncodeInterface.cpp
+index 12152e6..e76f203 100644
+--- a/components/EncodeInterface.cpp
++++ b/components/EncodeInterface.cpp
+@@ -271,7 +271,9 @@ void EncodeInterface::Initialize(const C2String& name, const SupportedCapabiliti
+                                                  C2Config::LEVEL_AVC_3, C2Config::LEVEL_AVC_3_1,
+                                                  C2Config::LEVEL_AVC_3_2, C2Config::LEVEL_AVC_4,
+                                                  C2Config::LEVEL_AVC_4_1, C2Config::LEVEL_AVC_4_2,
+-                                                 C2Config::LEVEL_AVC_5, C2Config::LEVEL_AVC_5_1})})
++                                                 C2Config::LEVEL_AVC_5, C2Config::LEVEL_AVC_5_1,
++                                                 C2Config::LEVEL_AVC_5_2, C2Config::LEVEL_AVC_6,
++                                                 C2Config::LEVEL_AVC_6_1, C2Config::LEVEL_AVC_6_2})})
+                         .withSetter(H264ProfileLevelSetter, mInputVisibleSize, mFrameRate, mBitrate)
+                         .build());
+     } else if (caps.codec == VideoCodec::VP8) {
+diff --git a/service/Android.bp b/service/Android.bp
+index 408f229..e3f66df 100644
+--- a/service/Android.bp
++++ b/service/Android.bp
+@@ -30,7 +30,8 @@ cc_defaults {
+         "libutils",
+     ],
+ 
+-    required: ["android.hardware.media.c2-default-seccomp_policy"],
++    required: ["android.hardware.media.c2-default-seccomp_policy",
++            "android.hardware.media.c2-extended-seccomp_policy"],
+ }
+ 
+ cc_binary {
+@@ -51,3 +52,10 @@ cc_binary {
+     init_rc: ["android.hardware.media.c2-service-v4l2.rc"],
+     vintf_fragments: ["android.hardware.media.c2-service-v4l2.xml"],
+ }
++
++prebuilt_etc {
++    name: "android.hardware.media.c2-extended-seccomp_policy",
++    vendor: true,
++    sub_dir: "seccomp_policy",
++    src: "android.hardware.media.c2-extended-seccomp_policy",
++}
+diff --git a/service/android.hardware.media.c2-extended-seccomp_policy b/service/android.hardware.media.c2-extended-seccomp_policy
+new file mode 100644
+index 0000000..734c53c
+--- /dev/null
++++ b/service/android.hardware.media.c2-extended-seccomp_policy
+@@ -0,0 +1,14 @@
++# Extra syscalls for the v4l2 codec2 HAL (Waydroid/AviumUI coexistence build).
++#
++# The base c2-default policy is too strict for the encoder/decoder path:
++# - uname: mesa/libdrm and libavutil probe the kernel/CPU (observed SIGSYS
++#   on __NR_uname while starting c2.v4l2.avc.encoder)
++# - kcmp/sched_getaffinity/sysinfo/mkdirat: required by mesa3d (same set as
++#   mediacodec.policy)
++# - sched_setaffinity: codec worker threads pin CPUs
++uname: 1
++kcmp: 1
++sched_getaffinity: 1
++sched_setaffinity: 1
++sysinfo: 1
++mkdirat: 1
+

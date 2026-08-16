@@ -1,0 +1,42 @@
+From c4e9263d7b95bc23563184a97831635daf205f6b Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Sun, 16 Aug 2026 07:16:42 +0000
+Subject: [PATCH] hwcomposer: maximize caption drag restores freeform size
+
+---
+ hwcomposer/wayland-hwc.cpp | 19 +++++++++++++++----
+ 1 file changed, 15 insertions(+), 4 deletions(-)
+
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+index b826bf5..2dfdf7d 100644
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -2147,10 +2147,21 @@ bool display::begin_host_titlebar_move(uint32_t serial)
+ 
+     pointer_sequence_owner = input_sequence_owner::Wayland;
+     active_gesture_task_id = target->taskID;
+-    xdg_toplevel_move(target->xdg_toplevel, seat, serial);
+-    ALOGI("TASK_XDG_GESTURE task=%u serial=%u input=pointer aosp_ctrl=0 "
+-            "api=move edge=0 accepted=1 reason=host-title-strip",
+-            task_id, serial);
++    if (target->last_host_maximized) {
++        // A maximized host window: the caption strip drag restores the
++        // window to its freeform size instead of starting an interactive
++        // move. That matches the AviumUI expectation "drag the top bar down
++        // to shrink the window back".
++        xdg_toplevel_unset_maximized(target->xdg_toplevel);
++        ALOGI("TASK_XDG_GESTURE task=%u serial=%u input=pointer aosp_ctrl=0 "
++                "api=restore edge=0 accepted=1 reason=host-title-strip",
++                task_id, serial);
++    } else {
++        xdg_toplevel_move(target->xdg_toplevel, seat, serial);
++        ALOGI("TASK_XDG_GESTURE task=%u serial=%u input=pointer aosp_ctrl=0 "
++                "api=move edge=0 accepted=1 reason=host-title-strip",
++                task_id, serial);
++    }
+     return true;
+ }
+ 
+-- 
+2.43.0
+

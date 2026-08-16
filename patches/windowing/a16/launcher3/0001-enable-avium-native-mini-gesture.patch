@@ -1,36 +1,37 @@
-From 6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5b Mon Sep 17 00:00:00 2001
+From 3eff9d317b0b4b91e4e62a5df06dead65a6283ff Mon Sep 17 00:00:00 2001
 From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
-Date: Wed, 12 Aug 2026 05:20:00 +0000
-Subject: [PATCH] launcher3: enable Avium native mini gesture
+Date: Thu, 13 Aug 2026 08:48:31 +0000
+Subject: [PATCH] launcher3: restore official PopUp 101 mini gesture
 
-The AviumUI "swipe up and hold to enter mini window" gesture was dead code:
-persist.avium.launchergesture defaults off and the 3.5f trigger threshold is
-unreachable because mCurrentShift is clamped to mDragLengthFactor (~1.3-1.7 on
-tablets). Lower the threshold to 1.1f (past full overview, still reachable)
-and route the gesture to the AviumUI native mini (org.avium.LAUNCHER_MINI_WINDOW
--> FreeformService/MiFreeform) instead of the framework pop-up windowing mode,
-so the release produces the rounded native mini window without a caption.
+The AviumUI swipe-up-and-hold gesture is dead code on tablets: persist.avium.launchergesture
+defaults off and CUSTOM_GESTURE_TRIGGER_THRESHOLD 3.5f is above mCurrentShift (clamped to
+mDragLengthFactor, ~1.3-1.7). Lower the threshold to 1.1f so the gesture is reachable past
+overview, and keep the official avium-16.2 landing: startActivityFromRecents with
+launchWindowingMode=101 (pinned popup). That is the same-task PopUp chrome with the system
+white edge bar on 102, not the MiFreeform overlay card.
+
+Also null-check baseIntent.getComponent() so the launcher skip does not NPE.
+
+Change-Id: I7a2c0e1b4f8d6a9c3e5b0d2a8f1c4e7b9a0d3f56
+---
+ quickstep/src/com/android/quickstep/AbsSwipeUpHandler.java | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
 
 diff --git a/quickstep/src/com/android/quickstep/AbsSwipeUpHandler.java b/quickstep/src/com/android/quickstep/AbsSwipeUpHandler.java
+index 23c5ee877b..f087f5c09c 100644
 --- a/quickstep/src/com/android/quickstep/AbsSwipeUpHandler.java
 +++ b/quickstep/src/com/android/quickstep/AbsSwipeUpHandler.java
-@@ -243,7 +243,12 @@ public abstract class AbsSwipeUpHandler<
+@@ -241,7 +241,7 @@ public abstract class AbsSwipeUpHandler<
+     // The previous task view type before the user quick switches between tasks
+     private TaskViewType mPreviousTaskViewType;
      //Ext add
 -    private static final float CUSTOM_GESTURE_TRIGGER_THRESHOLD = 3.5f;
 +    private static final float CUSTOM_GESTURE_TRIGGER_THRESHOLD = 1.1f;
      private static final String ACTION_PIN_LAST_APP = "org.avium.PINNED_LAST_APP";
      private boolean mAviumGestureHintShown = false;
      private Toast mAviumGestureToast = null;
-+    private static final String ACTION_AVIUM_LAUNCH_MINI_WINDOW =
-+            "org.avium.LAUNCHER_MINI_WINDOW";
-+    private static final String EXTRA_AVIUM_PACKAGE_NAME = "packageName";
-+    private static final String EXTRA_AVIUM_ACTIVITY_NAME = "activityName";
-+    private static final String EXTRA_AVIUM_USER_ID = "userId";
- 
-     private static int FLAG_COUNT = 0;
-@@ -3284,23 +3284,27 @@ public abstract class AbsSwipeUpHandler<
-         final ActivityManager.RecentTaskInfo currentTask = recentTasks.get(0);
--        final int taskId = currentTask.id;
+@@ -3285,7 +3285,9 @@ public abstract class AbsSwipeUpHandler<
+         final int taskId = currentTask.id;
  
          final String launcherPackageName = mContext.getPackageName();
 -        if (currentTask.baseIntent != null && launcherPackageName.equals(currentTask.baseIntent.getComponent().getPackageName())) {
@@ -40,33 +41,6 @@ diff --git a/quickstep/src/com/android/quickstep/AbsSwipeUpHandler.java b/quicks
              return;
          }
  
--        if (taskId <= 0) {
--
-+        ComponentName component = currentTask.topActivity;
-+        if (component == null && currentTask.baseIntent != null) {
-+            component = currentTask.baseIntent.getComponent();
-+        }
-+        if (component == null) {
-             return;
-         }
- 
--        final ActivityOptions options = ActivityOptions.makeBasic();
--        options.setLaunchWindowingMode(101); 
--
--        try {
--            ActivityTaskManager.getService().startActivityFromRecents(taskId, options.toBundle());
--        } catch (Exception e) {
--            //do nothing
--        }
-+        // Route through AviumUI's native mini (FreeformService/MiFreeform) so
-+        // the gesture produces the rounded native mini window instead of a
-+        // framework pop-up/freeform task with a caption.
-+        final Intent miniIntent = new Intent(ACTION_AVIUM_LAUNCH_MINI_WINDOW);
-+        miniIntent.putExtra(EXTRA_AVIUM_PACKAGE_NAME, component.getPackageName());
-+        miniIntent.putExtra(EXTRA_AVIUM_ACTIVITY_NAME, component.getClassName());
-+        miniIntent.putExtra(EXTRA_AVIUM_USER_ID, currentTask.userId);
-+        mContext.sendBroadcast(miniIntent);
-     }
- }
 -- 
 2.43.0
+

@@ -1,0 +1,85 @@
+From 5d36ffc55d6c8535c01b50efb6452ffa3eec14cb Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Fri, 14 Aug 2026 16:22:00 +0000
+Subject: [PATCH] hwcomposer: request GNOME server-side decorations
+
+Host xdg windows are CSD-less. Android Caption cannot hand off
+xdg_toplevel_move while Desk is off. Ask zxdg_decoration for
+SERVER_SIDE so GNOME owns the title-bar drag. Do not reopen Desk.
+---
+ hwcomposer/wayland-hwc.cpp | 17 +++++++++++++++++
+ hwcomposer/wayland-hwc.h   |  2 ++
+ 2 files changed, 19 insertions(+)
+
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+index 69dc8ef..304f939 100644
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -74,6 +74,7 @@
+ #include "viewporter-client-protocol.h"
+ #include "presentation-time-client-protocol.h"
+ #include "xdg-shell-client-protocol.h"
++#include "xdg-decoration-unstable-v1-client-protocol.h"
+ #include "tablet-unstable-v2-client-protocol.h"
+ #include "pointer-constraints-unstable-v1-client-protocol.h"
+ #include "pointer-gestures-unstable-v1-client-protocol.h"
+@@ -804,6 +805,8 @@ void window::minimize() {
+ 
+ window::~window() {
+     std::scoped_lock callback_lock(toplevel_callback_mutex);
++    if (xdg_decoration)
++        zxdg_toplevel_decoration_v1_destroy(xdg_decoration);
+     if (xdg_toplevel)
+         xdg_toplevel_destroy(xdg_toplevel);
+     if (xdg_surface)
+@@ -918,6 +921,14 @@ window::create(struct display *display, bool use_subsurfaces, std::string appID,
+         window->xdg_toplevel = xdg_surface_get_toplevel(window->xdg_surface);
+         assert(window->xdg_toplevel);
+         xdg_toplevel_add_listener(window->xdg_toplevel, &xdg_toplevel_listener, window.get());
++        if (display->decoration_manager) {
++            window->xdg_decoration =
++                zxdg_decoration_manager_v1_get_toplevel_decoration(
++                    display->decoration_manager, window->xdg_toplevel);
++            zxdg_toplevel_decoration_v1_set_mode(
++                window->xdg_decoration,
++                ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
++        }
+     } else if (display->shell) {
+         window->shell_surface =
+             wl_shell_get_shell_surface(display->shell, window->surface);
+@@ -2812,6 +2823,12 @@ registry_handle_global(void *data, struct wl_registry *registry,
+         d->wm_base = (struct xdg_wm_base*)wl_registry_bind(registry,
+                 id, &xdg_wm_base_interface, 1);
+         xdg_wm_base_add_listener(d->wm_base, &xdg_wm_base_listener, d);
++    } else if (strcmp(interface, "zxdg_decoration_manager_v1") == 0) {
++        // GNOME draws the Linux title bar. Android Caption stays off
++        // when Desk is closed; host windows still need a drag handle.
++        d->decoration_manager =
++            (struct zxdg_decoration_manager_v1*)wl_registry_bind(
++                registry, id, &zxdg_decoration_manager_v1_interface, 1);
+     } else if(strcmp(interface, "wl_shell") == 0) {
+         d->shell = (struct wl_shell *)wl_registry_bind(
+                 registry, id, &wl_shell_interface, 1);
+diff --git a/hwcomposer/wayland-hwc.h b/hwcomposer/wayland-hwc.h
+index 8692a45..fb0cbf7 100644
+--- a/hwcomposer/wayland-hwc.h
++++ b/hwcomposer/wayland-hwc.h
+@@ -265,6 +265,7 @@ struct window {
+     struct wl_shell_surface *shell_surface;
+     struct xdg_surface *xdg_surface;
+     struct xdg_toplevel *xdg_toplevel;
++    struct zxdg_toplevel_decoration_v1 *xdg_decoration;
+ 
+     /* Used for the background color */
+     bool dedicated_background_surface;
+@@ -466,6 +467,7 @@ struct display {
+     struct android_wlegl *android_wlegl;
+     struct zwp_linux_dmabuf_v1 *dmabuf;
+     struct xdg_wm_base *wm_base;
++    struct zxdg_decoration_manager_v1 *decoration_manager;
+     struct zwp_tablet_manager_v2* tablet_manager;
+     struct zwp_tablet_seat_v2 *tablet_seat;
+     struct zwp_pointer_constraints_v1 *pointer_constraints;
+-- 
+2.43.0
+

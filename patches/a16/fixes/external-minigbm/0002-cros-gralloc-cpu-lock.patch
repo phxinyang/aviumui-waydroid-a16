@@ -1,0 +1,38 @@
+7a3f638fa24fa014dcb56a11fb13e47e56c379d9
+From 92554254f35e73c20b1092e648de25da80bcdb4f Mon Sep 17 00:00:00 2001
+From: root <root@avium-build.arch>
+Date: Sat, 15 Aug 2026 23:51:03 +0000
+Subject: [PATCH] cros_gralloc: allow CPU lock without CPU usage for v4l2
+ encoder input
+
+---
+ cros_gralloc/cros_gralloc_driver.cc | 13 +++++--------
+ 1 file changed, 5 insertions(+), 8 deletions(-)
+
+diff --git a/cros_gralloc/cros_gralloc_driver.cc b/cros_gralloc/cros_gralloc_driver.cc
+index a13e392..920d07e 100644
+--- a/cros_gralloc/cros_gralloc_driver.cc
++++ b/cros_gralloc/cros_gralloc_driver.cc
+@@ -521,14 +521,11 @@ int32_t cros_gralloc_driver::lock(buffer_handle_t handle, int32_t acquire_fence,
+ 		return -EINVAL;
+ 	}
+ 
+-	if (!is_running_with_software_rendering_) {
+-		if ((hnd->usage & (GRALLOC_USAGE_SW_READ_MASK | GRALLOC_USAGE_SW_WRITE_MASK)) ==
+-		    0) {
+-			ALOGE("Attempted to lock() a buffer that was not allocated with a "
+-			      "BufferUsage::CPU_* usage.");
+-			return -EINVAL;
+-		}
+-	}
++	// Waydroid coexistence: virtual-display (RGBA) input buffers for the
++	// v4l2 codec2 encoder are GPU-allocated without CPU usage, but the format
++	// converter needs to CPU-read them. The underlying GBM buffer supports
++	// CPU access via gbm_bo_map, so do not gate lock() on the usage bits.
++	(void)is_running_with_software_rendering_;
+ 
+ 	auto buffer = get_buffer(hnd);
+ 	if (!buffer) {
+-- 
+2.43.0
+

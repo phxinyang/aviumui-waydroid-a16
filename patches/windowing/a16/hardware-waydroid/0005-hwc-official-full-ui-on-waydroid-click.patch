@@ -1,0 +1,40 @@
+From e1b6a9adfc84ee54ed42e7f1d35e3c843d1877bb Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Fri, 14 Aug 2026 17:40:00 +0000
+Subject: [PATCH] hwcomposer: use official full-UI when Waydroid is clicked
+
+Hybrid multi-window always ran when persist.waydroid.multi_windows=true.
+A16 SurfaceFlinger client-composes the default display, so that path
+presented an empty FRAMEBUFFER_TARGET and the Linux window stayed black.
+
+show-full-ui / active_apps=Waydroid now uses official
+non_compositing_full_ui_mode. Host-routed hybrid windows stay for
+explicit task routes.
+---
+ hwcomposer/hwcomposer.cpp | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/hwcomposer/hwcomposer.cpp b/hwcomposer/hwcomposer.cpp
+index 0f1ffee..06cfec7 100644
+--- a/hwcomposer/hwcomposer.cpp
++++ b/hwcomposer/hwcomposer.cpp
+@@ -171,9 +171,13 @@ namespace {
+         if (active_apps == "Waydroid")
+             pdev->display->set_full_ui_requested(true);
+ 
+-        // In multi-window-capable A16 builds this is always the hybrid
+-        // compositor. active_apps is only a full-UI lifecycle hint; it is not
+-        // a task set and cannot select or classify external windows.
++        // Clicking Waydroid / show-full-ui must use official full-UI.
++        // A16 SurfaceFlinger client-composes the default display; hybrid
++        // overlay prepare leaves FRAMEBUFFER_TARGET empty and the xdg
++        // window stays black.
++        if (pdev->multi_windows && active_apps == "Waydroid")
++            return std::make_unique<non_compositing_full_ui_mode>();
++
+         if (pdev->multi_windows) {
+             assert(pdev->should_compose);
+             return std::make_unique<multi_window_mode>();
+-- 
+2.43.0
+

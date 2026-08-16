@@ -1,0 +1,28 @@
+From 760ffb3ab50d892fc960ccf11dc6e560cae56e50 Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Thu, 13 Aug 2026 16:48:26 +0000
+Subject: [PATCH] wm: start host window bridge without a default-display Desk
+
+Change-Id: I8cfd3815eb99ed18f5c9a3ebbfd1579d8a81a0c6
+---
+ .../android/wm/shell/desktopmode/DesktopTasksController.kt    | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt
+index fc99e1a019da..93dda84a3979 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt
+@@ -337,6 +337,10 @@ class DesktopTasksController(
+             )
+         if (desktopState.canEnterDesktopMode) {
+             shellInit.addInitCallback({ onInit() }, this)
++        } else {
++            // Default display stays Avium fullscreen. Linux host windows still
++            // need the per-task xdg route, which used to start only in onInit().
++            shellInit.addInitCallback({ waydroidTaskWindowStateBridge.start() }, this)
+         }
+         latencyTracker = LatencyTracker.getInstance(context)
+ 
+-- 
+2.43.0
+
