@@ -1,0 +1,173 @@
+From 5f490447b8a5682f9534ffa33d21d928ff5b4b2e Mon Sep 17 00:00:00 2001
+From: Avium <build@avium.local>
+Date: Sun, 16 Aug 2026 05:23:27 +0000
+Subject: [PATCH] hwcomposer: import shm buffers into gralloc before EGL pixel
+ reads
+
+Cursor sprite buffers are presented on the A16 stack without a prior
+composer-side import, so EGL pixel reads (egl_render_to_pixels) fail in the
+gralloc driver with resource_info on unregistered handle on every cursor
+frame and the host cursor surface stays empty. Retain the handle via
+GraphicBufferMapper importBuffer before the SHM update and release it with
+the buffer.
+---
+ hwcomposer/egl-tools.cpp       |  7 ++++++-
+ hwcomposer/gralloc_handler.cpp | 22 ++++++++++++++++++++--
+ hwcomposer/gralloc_handler.h   |  7 ++++++-
+ hwcomposer/hwcomposer.cpp      |  7 ++++++-
+ hwcomposer/wayland-hwc.cpp     |  5 +++++
+ hwcomposer/wayland-hwc.h       |  7 +++++++
+ 6 files changed, 50 insertions(+), 5 deletions(-)
+
+diff --git a/hwcomposer/egl-tools.cpp b/hwcomposer/egl-tools.cpp
+index d91e58f..5b7185f 100644
+--- a/hwcomposer/egl-tools.cpp
++++ b/hwcomposer/egl-tools.cpp
+@@ -93,8 +93,13 @@ void egl_init(struct display* display) {
+ 
+ void egl_render_to_pixels(struct display* display, struct buffer* buf) {
+     // Wrap native handle into ANativeWindowBuffer for eglCreateImageKHR
++    // Use the gralloc-imported handle when present: EGL resolves the buffer
++    // through the gralloc driver and fails on unregistered handles (cursor
++    // sprite buffers are not imported by the composer on this A16 stack).
++    const native_handle_t* read_handle = buf->imported_handle
++            ? buf->imported_handle : buf->handle;
+     android::sp<android::GraphicBuffer> graphicBuffer = new android::GraphicBuffer(
+-            (native_handle_t*)buf->handle, android::GraphicBuffer::WRAP_HANDLE,
++            (native_handle_t*)read_handle, android::GraphicBuffer::WRAP_HANDLE,
+             buf->metadata.width, buf->metadata.height, buf->metadata.format, 1 /* layers */,
+             (uint64_t) android::GraphicBuffer::USAGE_HW_TEXTURE,
+             buf->metadata.pixel_stride);
+diff --git a/hwcomposer/gralloc_handler.cpp b/hwcomposer/gralloc_handler.cpp
+index cd29a3d..992cdc7 100644
+--- a/hwcomposer/gralloc_handler.cpp
++++ b/hwcomposer/gralloc_handler.cpp
+@@ -115,6 +115,22 @@ std::unique_ptr<buffer> create_shm_wl_buffer(display *display, const buffer_meta
+     return buf;
+ }
+ 
++void import_buffer_handle(buffer *buf, buffer_handle_t handle) {
++    if (!buf || !handle)
++        return;
++    buffer_handle_t imported = nullptr;
++    const auto st = android::GraphicBufferMapper::get().importBufferNoValidate(handle, &imported);
++    if (st != 0 || !imported) {
++        ALOGW("import_buffer_handle: importBuffer failed for handle=%p (err=%d)",
++              handle, st);
++        return;
++    }
++    if (buf->imported_handle && buf->imported_handle != imported) {
++        android::GraphicBufferMapper::get().freeBuffer(buf->imported_handle);
++    }
++    buf->imported_handle = imported;
++}
++
+ namespace {
+     //TODO: Implement failure handling for dmabuf
+     void create_failed(void *data __unused, zwp_linux_buffer_params_v1 *params __unused)
+@@ -350,7 +366,9 @@ void update_shm_buffer_default(display *, buffer *buffer) {
+     void *data;
+     uint32_t shm_stride, src_stride;
+     android::Rect bounds(buffer->metadata.width, buffer->metadata.height);
+-    if (android::GraphicBufferMapper::get().lock(buffer->handle, GRALLOC_USAGE_SW_READ_OFTEN, bounds, &data) == 0) {
++    const buffer_handle_t read_handle = buffer->imported_handle
++            ? buffer->imported_handle : buffer->handle;
++    if (android::GraphicBufferMapper::get().lock(read_handle, GRALLOC_USAGE_SW_READ_OFTEN, bounds, &data) == 0) {
+         src_stride = buffer->metadata.pixel_stride;
+         shm_stride = buffer->metadata.width;
+         for (int i = 0; i < buffer->metadata.height; i++) {
+@@ -373,7 +391,7 @@ void update_shm_buffer_default(display *, buffer *buffer) {
+                 *dist = (c & 0xFF00FF00) | ((c & 0xFF0000) >> 16) | ((c & 0xFF) << 16);
+             }
+         }
+-        android::GraphicBufferMapper::get().unlock(buffer->handle);
++        android::GraphicBufferMapper::get().unlock(read_handle);
+     } else {
+         ALOGE("update_shm_buffer: GraphicBufferMapper lock failed for handle=%p %ux%u",
+               buffer->handle, buffer->metadata.width, buffer->metadata.height);
+diff --git a/hwcomposer/gralloc_handler.h b/hwcomposer/gralloc_handler.h
+index 113d1bc..0d14557 100644
+--- a/hwcomposer/gralloc_handler.h
++++ b/hwcomposer/gralloc_handler.h
+@@ -36,6 +36,11 @@ std::unique_ptr<buffer> create_dmabuf_wl_buffer(display *display, const buffer_m
+                                                                 uint64_t modifier, buffer_handle_t handle);
+ std::unique_ptr<buffer> create_android_wl_buffer(display *display, const buffer_metadata& metadata, buffer_handle_t target);
+ 
++// Retains the buffer in this process's gralloc driver so EGL/mapper queries
++// (GRALLOC_DRM_GET_BUFFER_INFO / lock) can resolve it. Stores the imported
++// handle in buf->imported_handle, replacing and releasing a previous import.
++void import_buffer_handle(buffer *buf, buffer_handle_t handle);
++
+ 
+ class gralloc_handler {
+     using get_buffer_metadata_func = buffer_metadata (*)(display *display, hwc_layer_1_t *layer, size_t pos);
+@@ -63,4 +68,4 @@ class gralloc_handler {
+     void update_shm_buffer(display *display, buffer *buffer) const {
+         update_shm_buffer_impl(display, buffer);
+     }
+-};
+\ No newline at end of file
++};
+diff --git a/hwcomposer/hwcomposer.cpp b/hwcomposer/hwcomposer.cpp
+index 1f9a887..13d88f6 100644
+--- a/hwcomposer/hwcomposer.cpp
++++ b/hwcomposer/hwcomposer.cpp
+@@ -144,8 +144,13 @@ namespace {
+             buf = emplace_result.first->second.get();
+         }
+ 
+-        if (buf->isShm)
++        if (buf->isShm) {
++            // Cursor sprite buffers are presented on this A16 stack without a
++            // composer-side import; retain the handle in this process's
++            // gralloc driver so the EGL/mapper pixel read can resolve it.
++            import_buffer_handle(buf, layer->handle);
+             gralloc_handler.update_shm_buffer(pdev->display, buf);
++        }
+         return buf;
+     }
+ 
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+index 647d843..983b53e 100644
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -56,6 +56,7 @@
+ #include <libsync/sw_sync.h>
+ #include <sync/sync.h>
+ #include <hardware/gralloc.h>
++#include <ui/GraphicBufferMapper.h>
+ #include <log/log.h>
+ #include <sys/resource.h>
+ 
+@@ -91,6 +92,10 @@ buffer::~buffer() {
+         wl_buffer_destroy(wl_buffer);
+     if (isShm && shm_data && shm_data != MAP_FAILED)
+         munmap(shm_data, size);
++    if (imported_handle) {
++        android::GraphicBufferMapper::get().freeBuffer(imported_handle);
++        imported_handle = nullptr;
++    }
+     if (handle) {
+         native_handle_close(handle);
+         native_handle_delete(const_cast<native_handle_t*>(handle));
+diff --git a/hwcomposer/wayland-hwc.h b/hwcomposer/wayland-hwc.h
+index b57bc21..fa1916e 100644
+--- a/hwcomposer/wayland-hwc.h
++++ b/hwcomposer/wayland-hwc.h
+@@ -195,6 +195,13 @@ struct buffer {
+ 
+     // Owned clone used by SHM snapshots and released in ~buffer().
+     buffer_handle_t handle = nullptr;
++    // Handle retained in this process's gralloc driver via
++    // GraphicBufferMapper::importBuffer. The EGL/mapper pixel-read paths
++    // (egl_render_to_pixels / GraphicBufferMapper lock) query the buffer's
++    // info through the gralloc driver and fail with "resource_info() called
++    // on unregistered handle" when the layer (notably the cursor sprite) was
++    // presented without a prior composer-side import. Released in ~buffer().
++    buffer_handle_t imported_handle = nullptr;
+     buffer_metadata metadata {};
+ 
+     bool isShm = false;
+-- 
+2.43.0
+
