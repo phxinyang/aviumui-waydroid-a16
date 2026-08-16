@@ -93,7 +93,9 @@
 
 **问题 C（showWindow 幂等）**：showWindow 先 type 2032 加窗、删后以 2038 重加，删除失败留旧窗；入口先 detach 本视图旧窗口（防御）。
 
-**产物与复现**：`scripts/patch-avium-freeform-chooser.py`（classes4.dex，选择器）、`scripts/patch-avium-freeform-geometry-dedup.py`（classes15.dex FreeformView + classes5.dex KeepAliveService）。官方 APK `4fd97ba0…` → chooser 版 `4be2ab25…` → 最终 `23e02d61…`（已部署平板，overlay `/var/lib/waydroid/overlay/system/system_ext/app/AviumFreeWindow/`）。归档 `out/avium-freeform-chooser-freeform-20260816/`（out/ 为 gitignore）。
+**问题 D（旋转方向误判，侧边栏超大窗口真根因）**：App 用 `screenRotation` 判方向（ROTATION_0/2=竖屏）。平板物理横屏（3048x2032）但报 ROTATION_0 → App 当竖屏，`getRealScreenHeight()` 返回 max(w,h)=3048、`getRealScreenWidth()` 返回 min=2032，所有自由窗口/浮窗尺寸都按这个交换值算 → 侧边栏打开的应用窗口 2032x3048 垂直溢出（用户实测 uu 远程）。修复三处：`getRealScreenHeight/Width` 直接返回窗口物理高/宽（不再按旋转交换）；`FreeformHelper.screenIsPortrait` 改为按实际宽高判断（宽>高即横屏）。真机浮窗回到 1016x1806（9:16 竖窗、居中、适配屏幕）。
+
+**产物与复现**：`scripts/patch-avium-freeform-chooser.py`（classes4.dex，选择器）、`scripts/patch-avium-freeform-geometry-dedup.py`（classes15.dex FreeformView/FreeformHelper + classes5.dex KeepAliveService）。官方 APK `4fd97ba0…` → chooser 版 `4be2ab25…` → 几何版 `23e02d61…` → 方向修复版 `7edca1d2…`（已部署平板，overlay `/var/lib/waydroid/overlay/system/system_ext/app/AviumFreeWindow/`）。归档 `out/avium-freeform-chooser-freeform-20260816/`（out/ 为 gitignore）。
 
 **真机验证**：开机仅 1 条悬浮条；`LAUNCHER_MINI_WINDOW` 广播启动 mark.via → 浮窗 677x1204（适配）、任务在 Display #2。侧边栏路径（ForegroundService → ChooseAppFloatingView → launchAppNormally → ACTION_START_INTENT）与广播同路径，待用户实测确认。
 
