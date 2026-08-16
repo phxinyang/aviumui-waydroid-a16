@@ -80,3 +80,21 @@
 ## 证伪实验
 
 以下方案排除出正式设计：旧 `services.jar` 热补丁、叠加式 Avium APK/smali 链、RawName/包名/Caption 顺序推断 task、substring 黑名单、固定 min/max 尺寸、按 bounds/display 变化迁移 task、全局 `forceResizable`，以及 `set-window-mode.sh` 的 android/compat/native 三选一模式。native 黑屏实验和旧镜像也不是产品入口。具体文件索引见 [`docs/ARCHIVE.md`](ARCHIVE.md)。
+
+## AviumFreeWindow APK 层修复（2026-08-16，用户确认方向）
+
+**决策**：前两个问题（选择器启动路由、重复悬浮条）在 App 层修复（框架保持官方）。本条目区别于上面"证伪实验"排除的"叠加式 Avium APK/smali 链"——那是旧窗口工作的实验性堆叠，不是本次"把官方 APK 自身预留的官方路径接上 + 修官方 App 自身 bug"的最小修复。
+
+**问题 1（选择器→自由窗口）**：官方 APK 选择器非气泡分支调 `launchedappforavium`（102 轻量小窗，display 0），类里自带的官方自由窗口路径 `launchAppNormally`（→ FreeformService `com.sunshine.freeform.action.start.intent` → MiFreeform 虚拟显示）是死代码。修复：两个适配器（ChooseAppFloatingAdapter/AllAppsAdapter）非气泡分支改调 `launchAppNormally`。气泡模式与框架不动。`persist.avium.popup_view` 非 bubble 时选应用即进虚拟显示自由窗口。
+
+**问题 A（几何）**：官方尺寸公式 `height = min(realH, realW)/ratio` 假设竖屏；横屏 ROTATION_0 平板算出 2032x3612 虚拟显示、2032x3048 浮窗垂直溢出。修复：`initConfig` 与 `showWindowToMini` 两处 `freeformScreenHeight` 上限为 `getRealScreenHeight()`。真机浮窗回到 677x1204。
+
+**问题 B（双悬浮条）**：真根源是 `ForegroundService.showFloating()` 与 `KeepAliveService`（无障碍保活）各自开机加一个 54x162 悬浮窗。修复：`KeepAliveService.showFloating()` 置空，悬浮条归 ForegroundService。真机开机仅一条。
+
+**问题 C（showWindow 幂等）**：showWindow 先 type 2032 加窗、删后以 2038 重加，删除失败留旧窗；入口先 detach 本视图旧窗口（防御）。
+
+**产物与复现**：`scripts/patch-avium-freeform-chooser.py`（classes4.dex，选择器）、`scripts/patch-avium-freeform-geometry-dedup.py`（classes15.dex FreeformView + classes5.dex KeepAliveService）。官方 APK `4fd97ba0…` → chooser 版 `4be2ab25…` → 最终 `23e02d61…`（已部署平板，overlay `/var/lib/waydroid/overlay/system/system_ext/app/AviumFreeWindow/`）。归档 `out/avium-freeform-chooser-freeform-20260816/`（out/ 为 gitignore）。
+
+**真机验证**：开机仅 1 条悬浮条；`LAUNCHER_MINI_WINDOW` 广播启动 mark.via → 浮窗 677x1204（适配）、任务在 Display #2。侧边栏路径（ForegroundService → ChooseAppFloatingView → launchAppNormally → ACTION_START_INTENT）与广播同路径，待用户实测确认。
+
+**环境注意**：2026-08-16 平板重启后 `/var/lib/waydroid/waydroid.cfg` 再次被清零（老毛病，备份目录已有 `waydroid.cfg.zeroed-20260810`），已从 `waydroid.cfg.bak-gralloc` 恢复（损坏文件保留为 `waydroid.cfg.zeroed-20260816`）。平板 IP 现为 `<tablet-ip>`。
