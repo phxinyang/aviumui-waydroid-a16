@@ -35,7 +35,7 @@
     {
       "path": "build/soong",
       "base_head": "2e5b2070e5c672dce237ef0118e1d7bb43f6773d",
-      "expected_tree": "62bb2fa435e411dcefe4819ea093a0f3a6f4febf",
+      "expected_tree": "c6704ce21ce6fdd59945e8a55f4e3ab1b51d4a35",
       "patches": [
         {
           "source": "upstream",
@@ -56,6 +56,14 @@
         {
           "source": "local",
           "path": "manual/build-soong/0002-fix-building-on-a16.patch"
+        },
+        {
+          "source": "local",
+          "path": "manual/build-soong/0004-soong-mark-rustc-wrapper-executable.patch"
+        },
+        {
+          "source": "local",
+          "path": "manual/build-soong/0003-rustc-wrapper-anchor-pwd-strip.patch"
         }
       ]
     },
@@ -121,11 +129,15 @@
     {
       "path": "external/minigbm",
       "base_head": "9b85c0b9fd28abfb5f801cb8032621eee9ed3e42",
-      "expected_tree": "8fedebc80f7be972c4da59de469aa735f2ed5227",
+      "expected_tree": "7a3f638fa24fa014dcb56a11fb13e47e56c379d9",
       "patches": [
         {
           "source": "local",
           "path": "fixes/external-minigbm/0001-include-unistd-for-fd-apis.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/external-minigbm/0002-cros-gralloc-cpu-lock.patch"
         }
       ]
     },
@@ -158,7 +170,7 @@
     {
       "path": "frameworks/av",
       "base_head": "e40c0b45225070d717393301c5e209a7ff03c46b",
-      "expected_tree": "bf96e132369aab9b4626491740b0b65f82995cc5",
+      "expected_tree": "9943ff2a164a1f1a30e679820df5adcc455906dc",
       "patches": [
         {
           "source": "upstream",
@@ -275,6 +287,10 @@
         {
           "source": "upstream",
           "path": "frameworks/av/0029-audioserver-Remove-WAKE_ALARM-capability.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/frameworks-av/0001-media-omx-store-fail-fast.patch"
         }
       ]
     },
@@ -1046,6 +1062,72 @@
         {
           "source": "local",
           "path": "fixes/packages-apps-devicediagnostics/0001-guard-trade-in-security.patch"
+        }
+      ]
+    },
+    {
+      "path": "external/v4l2_codec2",
+      "base_head": "16700e04214451441a1f7f5523b69848efb1f028",
+      "expected_tree": "0b404987277b52596441f3e771fb036f2246d82a",
+      "patches": [
+        {
+          "source": "local",
+          "path": "fixes/external-v4l2-codec2/0001-v4l2-codec2-camera-group.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/external-v4l2-codec2/0002-v4l2-codec2-scan-video-devices.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/external-v4l2-codec2/0003-v4l2-codec2-extended-seccomp.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/external-v4l2-codec2/0004-v4l2-codec2-seccomp-socket-sched.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/external-v4l2-codec2/0005-v4l2-codec2-seccomp-looper-eventfd.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/external-v4l2-codec2/0006-v4l2-codec2-cpu-read-often-input.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/external-v4l2-codec2/0007-v4l2-codec2-revert-cpu-read-often.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/external-v4l2-codec2/0008-v4l2-codec2-tolerate-force-key-frame.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/external-v4l2-codec2/0009-v4l2-codec2-decoder-input-size-0x0.patch"
+        }
+      ]
+    },
+    {
+      "path": "external/stagefright-plugins",
+      "base_head": "1bc14018bd637bdd7f0869edf72cfaec6de10c76",
+      "expected_tree": "c35adcbbfc0ece704f072991dfe5b3fa61b8efe9",
+      "patches": [
+        {
+          "source": "local",
+          "path": "fixes/external-stagefright-plugins/0001-codec2-install-ffmpeg-policy.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/external-stagefright-plugins/0002-codec2-ffmpeg-policy-socket-sched.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/external-stagefright-plugins/0003-codec2-ffmpeg-policy-looper-eventfd.patch"
+        },
+        {
+          "source": "local",
+          "path": "fixes/external-stagefright-plugins/0004-codec2-hide-h264-hevc-when-v4l2.patch"
         }
       ]
     }

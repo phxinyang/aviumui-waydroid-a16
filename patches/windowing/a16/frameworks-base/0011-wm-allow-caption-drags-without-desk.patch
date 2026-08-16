@@ -1,0 +1,44 @@
+From 56000324ce884c051f94b99bd183d438e4b40e55 Mon Sep 17 00:00:00 2001
+From: Avium <build@avium.local>
+Date: Sat, 15 Aug 2026 17:32:57 +0000
+Subject: [PATCH] wm: allow caption drags on the desk-less default display
+
+ENABLE_BLOCK_NON_DESKTOP_DISPLAY_WINDOW_DRAG_BUGFIX ignores caption drag
+moves when isEligibleWindowDropTarget is false. With the Waydroid default
+display kept desk-less, display 0 is never eligible, so AOSP freeform
+windows cannot be dragged. Treat the default display as an eligible drop
+target when it does not host desktop mode (coexistence), restoring freeform
+caption drags without re-enabling the desk.
+
+Change-Id: Ib9b7d4d8fe7dcc8635048445663e528688851e94
+---
+ .../android/wm/shell/desktopmode/ShellDesktopStateImpl.kt | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/ShellDesktopStateImpl.kt b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/ShellDesktopStateImpl.kt
+index 7d3d55513a10..56cf945bf20f 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/ShellDesktopStateImpl.kt
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/ShellDesktopStateImpl.kt
+@@ -16,6 +16,7 @@
+ package com.android.wm.shell.desktopmode
+ 
+ import android.app.WindowConfiguration.ACTIVITY_TYPE_HOME
++import android.view.Display
+ import com.android.wm.shell.ShellTaskOrganizer
+ import com.android.wm.shell.shared.desktopmode.DesktopState
+ import com.android.wm.shell.sysui.ShellController
+@@ -59,5 +60,10 @@ class ShellDesktopStateImpl(
+      */
+     override fun isEligibleWindowDropTarget(displayId: Int): Boolean =
+         isInDesktop(displayId) ||
+-            (desktopState.isDesktopModeSupportedOnDisplay(displayId) && isHomeFocused(displayId))
++            (desktopState.isDesktopModeSupportedOnDisplay(displayId) && isHomeFocused(displayId)) ||
++            // Waydroid coexistence keeps the default display desk-less, but AOSP freeform
++            // windows on it must stay draggable. The official non-desktop-display drag
++            // bugfix would otherwise ignore every caption drag here.
++            (displayId == Display.DEFAULT_DISPLAY &&
++                !desktopState.isDesktopModeSupportedOnDisplay(displayId))
+ }
+-- 
+2.43.0
+

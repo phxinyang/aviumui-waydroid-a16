@@ -1,0 +1,437 @@
+From d2316e4e9951062432f4068b953ce893c20883ed Mon Sep 17 00:00:00 2001
+From: Avium <build@avium.local>
+Date: Sun, 16 Aug 2026 06:42:27 +0000
+Subject: [PATCH] hwcomposer: per-window scale + maximized caption drag fix
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Host task windows got their host→Android scale from the single global
+display->scale, which flaps between the full-UI carrier (4x) and task
+windows (2x) because the fractional-scale listener only fires during
+calibration and overwrites the global per surface. That made pointer
+mapping inconsistent with the rendered caption, so the top-strip drag
+(begin_host_titlebar_move) missed on maximized windows. Derive each task
+window scale from its task bounds and configured host size, map pointer
+events with the owning window scale, request full-display task bounds on
+maximize instead of retaining the freeform origin, and keep rejection
+diagnostics for the caption hit test.
+---
+ hwcomposer/hwcomposer.cpp  |   2 +
+ hwcomposer/wayland-hwc.cpp | 163 +++++++++++++++++++++++++++----------
+ hwcomposer/wayland-hwc.h   |  19 +++++
+ 3 files changed, 141 insertions(+), 43 deletions(-)
+
+diff --git a/hwcomposer/hwcomposer.cpp b/hwcomposer/hwcomposer.cpp
+index 13d88f6..de03533 100644
+--- a/hwcomposer/hwcomposer.cpp
++++ b/hwcomposer/hwcomposer.cpp
+@@ -466,6 +466,7 @@ int apply_hwc_layer_to_window(waydroid_hwc_composer_device_1 *pdev, hwc_layer_1
+             pdev->display->layers[window_layer->surface] = {
+                     .x = hwc_layer->displayFrame.left,
+                     .y = hwc_layer->displayFrame.top,
++                    .scale = window->scale,
+                     .owner_task_id = window->taskID,
+                     .owner_window = window };
+         }
+@@ -473,6 +474,7 @@ int apply_hwc_layer_to_window(waydroid_hwc_composer_device_1 *pdev, hwc_layer_1
+         // surface, so keep its Android-space origin in the same map.
+         pdev->display->layers[window->surface] = {
+                 .x = origin_x, .y = origin_y,
++                .scale = window->scale,
+                 .owner_task_id = window->taskID,
+                 .owner_window = window };
+     }
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+index 983b53e..b826bf5 100644
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -194,8 +194,10 @@ void
+ do_hotplug(struct display *display) {
+     if (display->touch) {
+         char property[PROPERTY_VALUE_MAX];
+-        int width = floor(display->width * display->scale);
+-        int height = floor(display->height * display->scale);
++        display->android_width = floor(display->width * display->scale);
++        display->android_height = floor(display->height * display->scale);
++        int width = display->android_width;
++        int height = display->android_height;
+ 
+         if (property_get("persist.waydroid.width_padding", property, nullptr) > 0)
+             width -= atoi(property);
+@@ -264,6 +266,8 @@ xdg_toplevel_handle_configure(void *data, struct xdg_toplevel *,
+         const bool tiled_changed =
+                 host_tiled || window->last_host_tiled_configure;
+         window->last_host_tiled_configure = host_tiled;
++        window->last_host_maximized =
++                configured_state == waydroid_task_window_state::Maximized;
+         ALOGI("TASK_XDG_STATES task=%s n=%zu tiled=%d max=%d resizing=%d "
+                 "activated=%d suggest=%dx%d",
+                 window->taskID.c_str(), states->size / sizeof(*state_data),
+@@ -507,6 +511,17 @@ void window::set_task_bounds(const hwc_rect_t &bounds) {
+     task_right = bounds.right;
+     task_bottom = bounds.bottom;
+     task_bounds_valid = true;
++    // Deterministic per-window scale from the configured host size. The
++    // compositor's fractional-scale event only fires during calibration, so
++    // task windows must derive their own host→Android scale geometrically.
++    if (host_carrier_configured() && (task_right - task_left) > 0) {
++        const double hscale =
++                (task_right - task_left) / static_cast<double>(host_carrier_width);
++        const double vscale =
++                (task_bottom - task_top) / static_cast<double>(host_carrier_height);
++        if (hscale > 0.0 && vscale > 0.0)
++            scale = std::min(hscale, vscale);
++    }
+     if (!changed) {
+         return;
+     }
+@@ -538,6 +553,7 @@ void window::set_task_bounds(const hwc_rect_t &bounds) {
+         std::scoped_lock input_lock(display->input_state_mutex);
+         display->layers[surface] = {
+                 .x = task_left, .y = task_top,
++                .scale = scale,
+                 .owner_task_id = taskID,
+                 .owner_window = this };
+     }
+@@ -660,8 +676,14 @@ void window::handle_task_configure(int32_t width, int32_t height) {
+         return;
+     }
+     apply_task_carrier_configure(width, height);
+-    const int physical_width = std::max(1, static_cast<int>(ceil(width * display->scale)));
+-    const int physical_height = std::max(1, static_cast<int>(ceil(height * display->scale)));
++    double wscale = scale > 0.0 ? scale : display->scale;
++    // A maximized window fills the whole Android display; its content scale
++    // is display/window, independent of the previous freeform task bounds.
++    if (last_host_maximized && display->android_width > 0 && width > 0) {
++        wscale = display->android_width / static_cast<double>(width);
++    }
++    const int physical_width = std::max(1, static_cast<int>(ceil(width * wscale)));
++    const int physical_height = std::max(1, static_cast<int>(ceil(height * wscale)));
+     const bool host_size_changed = physical_width != last_host_configure_width
+             || physical_height != last_host_configure_height;
+     const bool drag_state_changed = drag_resizing != host_drag_resizing;
+@@ -679,8 +701,14 @@ void window::handle_task_configure(int32_t width, int32_t height) {
+         ALOGE("ignoring configure for malformed task id %s", taskID.c_str());
+         return;
+     }
+-    const task_window_bounds bounds = {task_left, task_top,
+-            task_left + physical_width, task_top + physical_height};
++    // A maximized/fullscreen host window maps onto the whole Android
++    // display; it must not keep the freeform task origin (which would push
++    // the task out of the display and break the caption strip hit test).
++    const bool maximizing = last_host_maximized;
++    const int origin_x = maximizing ? 0 : task_left;
++    const int origin_y = maximizing ? 0 : task_top;
++    const task_window_bounds bounds = {origin_x, origin_y,
++            origin_x + physical_width, origin_y + physical_height};
+     const uint64_t generation = display->enqueue_task_window_bounds_request(
+             parsed_task, bounds, drag_resizing);
+     if (generation == 0)
+@@ -855,13 +883,20 @@ window::~window() {
+ 
+ static void fractional_scale_handle_preferred_scale(void *data, struct wp_fractional_scale_v1 *,
+             uint32_t scale_times_120) {
+-    struct display *display = (struct display *)data;
++    struct window *window = static_cast<struct window *>(data);
++    if (!window)
++        return;
++    struct display *display = window->display;
+     if (!display->viewporter) {
+         // We should always have the viewporter if we have the fractional scale manager
+         // but for debugging purpuses we may decide to disable one
+         return;
+     }
+-    display->scale = scale_times_120 / 120.0;
++    const double scale = scale_times_120 / 120.0;
++    // Per-window scale is authoritative for this surface. Keep the global as
++    // a fallback for surfaces without a window (e.g. the cursor context).
++    window->scale = scale;
++    display->scale = scale;
+ }
+ 
+ static const struct wp_fractional_scale_v1_listener fractional_scale_listener = {
+@@ -898,6 +933,7 @@ window::create(struct display *display, bool use_subsurfaces, std::string appID,
+         display->layers[window->surface] = {
+                 .x = window->task_bounds_valid ? window->task_left : 0,
+                 .y = window->task_bounds_valid ? window->task_top : 0,
++                .scale = window->scale,
+                 .owner_task_id = window->taskID,
+                 .owner_window = window.get() };
+     }
+@@ -989,7 +1025,7 @@ window::create(struct display *display, bool use_subsurfaces, std::string appID,
+             // We only support one global scale
+             fs = wp_fractional_scale_manager_v1_get_fractional_scale(
+                     display->fractional_scale_manager, window->surface);
+-            wp_fractional_scale_v1_add_listener(fs, &fractional_scale_listener, display);
++            wp_fractional_scale_v1_add_listener(fs, &fractional_scale_listener, window.get());
+         }
+ 
+         // Some compositors fail to give us a window size or scale without a buffer attached
+@@ -1367,9 +1403,11 @@ pointer_handle_enter(void *data, struct wl_pointer *,
+         if (it != display->layers.end())
+             input_frame = it->second;
+     }
+-    if (display->scale != 1) {
+-        x = int(x * display->scale);
+-        y = int(y * display->scale);
++    const double scale = input_frame.scale > 0.0
++            ? input_frame.scale : display->scale;
++    if (scale != 1) {
++        x = int(x * scale);
++        y = int(y * scale);
+     }
+     display->pointer_display_y = y + input_frame.y;
+     display->cursor_handler->on_cursor_enter(display);
+@@ -1405,12 +1443,6 @@ pointer_handle_motion(void *data, struct wl_pointer *,
+         ALOGE("%s:%d error in touch clock_gettime: %s",
+               __FILE__, __LINE__, strerror(errno));
+     }
+-    x = wl_fixed_to_int(sx);
+-    y = wl_fixed_to_int(sy);
+-    if (display->scale != 1) {
+-        x = int(x * display->scale);
+-        y = int(y * display->scale);
+-    }
+     display->pointer_surface_y = wl_fixed_to_int(sy);
+     layerFrame input_frame;
+     {
+@@ -1419,6 +1451,14 @@ pointer_handle_motion(void *data, struct wl_pointer *,
+         if (it != display->layers.end())
+             input_frame = it->second;
+     }
++    x = wl_fixed_to_int(sx);
++    y = wl_fixed_to_int(sy);
++    const double scale = input_frame.scale > 0.0
++            ? input_frame.scale : display->scale;
++    if (scale != 1) {
++        x = int(x * scale);
++        y = int(y * scale);
++    }
+     x += input_frame.x;
+     y += input_frame.y;
+     display->pointer_display_y = y;
+@@ -1750,12 +1790,6 @@ touch_handle_down(void *data, struct wl_touch *,
+        ALOGE("%s:%d error in touch clock_gettime: %s",
+             __FILE__, __LINE__, strerror(errno));
+     }
+-    x = wl_fixed_to_int(x_w);
+-    y = wl_fixed_to_int(y_w);
+-    if (display->scale != 1) {
+-        x = int(x * display->scale);
+-        y = int(y * display->scale);
+-    }
+     layerFrame input_frame;
+     {
+         std::scoped_lock input_lock(display->input_state_mutex);
+@@ -1763,6 +1797,14 @@ touch_handle_down(void *data, struct wl_touch *,
+         if (it != display->layers.end())
+             input_frame = it->second;
+     }
++    x = wl_fixed_to_int(x_w);
++    y = wl_fixed_to_int(y_w);
++    const double scale = input_frame.scale > 0.0
++            ? input_frame.scale : display->scale;
++    if (scale != 1) {
++        x = int(x * scale);
++        y = int(y * scale);
++    }
+     x += input_frame.x;
+     y += input_frame.y;
+ 
+@@ -1852,12 +1894,6 @@ touch_handle_motion(void *data, struct wl_touch *,
+             ALOGE("%s:%d error in touch clock_gettime: %s",
+                   __FILE__, __LINE__, strerror(errno));
+         }
+-        x = wl_fixed_to_int(x_w);
+-        y = wl_fixed_to_int(y_w);
+-        if (display->scale != 1) {
+-            x = int(x * display->scale);
+-            y = int(y * display->scale);
+-        }
+         layerFrame input_frame;
+         {
+             std::scoped_lock input_lock(display->input_state_mutex);
+@@ -1865,6 +1901,14 @@ touch_handle_motion(void *data, struct wl_touch *,
+             if (it != display->layers.end())
+                 input_frame = it->second;
+         }
++        x = wl_fixed_to_int(x_w);
++        y = wl_fixed_to_int(y_w);
++        const double scale = input_frame.scale > 0.0
++                ? input_frame.scale : display->scale;
++        if (scale != 1) {
++            x = int(x * scale);
++            y = int(y * scale);
++        }
+         x += input_frame.x;
+         y += input_frame.y;
+ 
+@@ -2028,47 +2072,78 @@ bool display::begin_task_window_drag(uint32_t task_id, uint32_t ctrl_type)
+ 
+ bool display::begin_host_titlebar_move(uint32_t serial)
+ {
+-    if (!seat)
++    if (!seat) {
++        ALOGI("HOST_TITLEBAR_REJECT reason=no-seat");
+         return false;
++    }
+ 
+     const int caption_height = host_caption_height_px(this);
+     std::scoped_lock input_lock(input_state_mutex);
+-    if (!pointer_surface || pointer_display_y < 0)
++    if (!pointer_surface || pointer_display_y < 0) {
++        ALOGI("HOST_TITLEBAR_REJECT reason=no-pointer pointer_display_y=%d",
++                pointer_display_y);
+         return false;
++    }
+ 
+     const auto layer_it = layers.find(pointer_surface);
+-    if (layer_it == layers.end() || !layer_it->second.owner_window)
++    if (layer_it == layers.end() || !layer_it->second.owner_window) {
++        ALOGI("HOST_TITLEBAR_REJECT reason=no-layer surface=%p",
++                static_cast<void *>(pointer_surface));
+         return false;
++    }
+ 
+     window *target = layer_it->second.owner_window;
+-    if (!target->xdg_toplevel || !target->task_bounds_valid)
++    if (!target->xdg_toplevel || !target->task_bounds_valid) {
++        ALOGI("HOST_TITLEBAR_REJECT task=%s reason=no-toplevel-or-bounds "
++                "xdg=%d bounds_valid=%d",
++                target->taskID.c_str(), target->xdg_toplevel != nullptr,
++                static_cast<int>(target->task_bounds_valid));
+         return false;
++    }
+ 
+     // Only the top caption strip starts an xdg move. The rest of the
+     // host window keeps its Android input semantics, so buttons and app
+     // content remain unaffected.
+     if (pointer_display_y < target->task_top
+             || pointer_display_y >= target->task_top + caption_height) {
++        ALOGI("HOST_TITLEBAR_REJECT task=%s reason=outside-caption "
++                "pointer_display_y=%d task_top=%d caption=%d scale=%f",
++                target->taskID.c_str(), pointer_display_y, target->task_top,
++                caption_height, target->scale);
+         return false;
+     }
+ 
+     uint32_t task_id = 0;
+-    if (!target->get_numeric_task_id(&task_id))
++    if (!target->get_numeric_task_id(&task_id)) {
++        ALOGI("HOST_TITLEBAR_REJECT task=%s reason=bad-task-id",
++                target->taskID.c_str());
+         return false;
++    }
+ 
+     task_window_route route;
+-    if (!get_task_window_route(task_id, &route) || !route.enabled)
++    if (!get_task_window_route(task_id, &route) || !route.enabled) {
++        ALOGI("HOST_TITLEBAR_REJECT task=%u reason=route-disabled",
++                task_id);
+         return false;
++    }
+ 
+     // The press was already recorded by pointer_handle_button as an
+     // Android-owned pointer sequence. Claim it for Wayland and let the
+     // compositor own the interactive move.
+     if (!pointer_button_down || pointer_gesture_task_id != target->taskID
+             || pointer_sequence_owner != input_sequence_owner::Android) {
++        ALOGI("HOST_TITLEBAR_REJECT task=%s reason=sequence mismatch "
++                "down=%d gesture=%s owner=%d",
++                target->taskID.c_str(), static_cast<int>(pointer_button_down),
++                pointer_gesture_task_id.c_str(),
++                static_cast<int>(pointer_sequence_owner));
+         return false;
+     }
+-    if (!active_gesture_task_id.empty())
++    if (!active_gesture_task_id.empty()) {
++        ALOGI("HOST_TITLEBAR_REJECT task=%s reason=gesture-busy active=%s",
++                target->taskID.c_str(), active_gesture_task_id.c_str());
+         return false;
++    }
+ 
+     pointer_sequence_owner = input_sequence_owner::Wayland;
+     active_gesture_task_id = target->taskID;
+@@ -2704,12 +2779,6 @@ tablet_tool_motion(void *data, struct zwp_tablet_tool_v2 *,
+             ALOGE("%s:%d error in touch clock_gettime: %s",
+                   __FILE__, __LINE__, strerror(errno));
+         }
+-        x = wl_fixed_to_int(x_w);
+-        y = wl_fixed_to_int(y_w);
+-        if (display->scale != 1) {
+-            x = int(x * display->scale);
+-            y = int(y * display->scale);
+-        }
+         layerFrame input_frame;
+         {
+             std::scoped_lock input_lock(display->input_state_mutex);
+@@ -2717,6 +2786,14 @@ tablet_tool_motion(void *data, struct zwp_tablet_tool_v2 *,
+             if (it != display->layers.end())
+                 input_frame = it->second;
+         }
++        x = wl_fixed_to_int(x_w);
++        y = wl_fixed_to_int(y_w);
++        const double scale = input_frame.scale > 0.0
++                ? input_frame.scale : display->scale;
++        if (scale != 1) {
++            x = int(x * scale);
++            y = int(y * scale);
++        }
+         x += input_frame.x;
+         y += input_frame.y;
+ 
+diff --git a/hwcomposer/wayland-hwc.h b/hwcomposer/wayland-hwc.h
+index fa1916e..3c17d4d 100644
+--- a/hwcomposer/wayland-hwc.h
++++ b/hwcomposer/wayland-hwc.h
+@@ -99,6 +99,10 @@ struct window;
+ struct layerFrame {
+     int x = 0;
+     int y = 0;
++    // Host→Android scale for this surface. 0 => fall back to the global
++    // display->scale (per-window fractional scales differ, so the global is
++    // only a fallback).
++    double scale = 0.0;
+     std::string owner_task_id;
+     struct window *owner_window = nullptr;
+ };
+@@ -302,6 +306,12 @@ struct window {
+     int task_right = 0;
+     int task_bottom = 0;
+     bool task_bounds_valid = false;
++    // This surface's own host→Android scale, from the compositor's
++    // fractional-scale report for this window. The global display->scale is
++    // shared by every window and flaps between the full-UI carrier (4x) and
++    // task windows (2x), so window geometry and pointer mapping must use the
++    // per-window value. 0 means "not reported yet".
++    double scale = 0.0;
+     // Compat keeps Android WM authoritative but still needs a local
+     // origin for child surfaces when a task crosses x=0/y=0.
+     int layer_origin_x = 0;
+@@ -325,6 +335,10 @@ struct window {
+     // unpacked authority bit for the current task configure.
+     bool last_host_tiled_configure = false;
+     bool taken_host_tiled = false;
++    // The latest toplevel configure carried the MAXIMIZED/FULLSCREEN state.
++    // A maximized host window maps onto the whole Android display, so its
++    // content scale is display/window and its task origin is (0,0).
++    bool last_host_maximized = false;
+     // Logical size last configured by the host compositor.  Once a
+     // task has an xdg configure, Android's asynchronous old frame must
+     // not resize the transparent carrier back to the previous size.
+@@ -556,6 +570,11 @@ struct display {
+     int full_height;
+     int req_width;
+     int req_height;
++    // Android display size in Android pixels, fixed at hotplug. The host
++    // logical size is width/height * scale; maximized task windows must
++    // scale against this constant, not the racy global scale.
++    int android_width = 0;
++    int android_height = 0;
+     int refresh;
+ 
+     std::unordered_set<uint32_t> formats;
+-- 
+2.43.0
+

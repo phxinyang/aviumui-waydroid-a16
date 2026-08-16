@@ -41,13 +41,21 @@
         {
           "path": "a16/frameworks-base/0009-wm-desktop-first-listener-without-desk.patch",
           "sha256": "fb236b31090b5ac4afe0bbda92469435c436b30b06fc79036a4095020407792c"
+        },
+        {
+          "path": "a16/frameworks-base/0010-wm-limit-freeform-caption-to-default-display.patch",
+          "sha256": "0557ecb80e1f60da054ca724f4312fa7b8a62bb726bbdd8490b89abee4919257"
+        },
+        {
+          "path": "a16/frameworks-base/0011-wm-allow-caption-drags-without-desk.patch",
+          "sha256": "e1ef41e0d74ae72991815359a7f3f93f12df2de4b3614212583c038ce0a8a0ac"
         }
       ]
     },
     {
       "path": "hardware/waydroid",
       "base_tree": "62d1bbd926cc744ad8f080cfc91cbfdb9e915264",
-      "expected_tree": "bd699cdb01fb55873f61dd0a321a2d2f096ac3f2",
+      "expected_tree": "5ad2e3b8f1a1ffde6783301dbb7be521e3eac0c5",
       "patches": [
         {
           "path": "a16/hardware-waydroid/0001-framework-routed-hybrid-windows.patch",
@@ -80,6 +88,10 @@
         {
           "path": "a16/hardware-waydroid/0008-hwc-import-shm-buffers-before-egl-read.patch",
           "sha256": "8d2f967df5712a641e63a3e4cf159df97b40d28da59bea5cae8a774eb8d93062"
+        },
+        {
+          "path": "a16/hardware-waydroid/0009-hwc-per-window-scale-caption-drag.patch",
+          "sha256": "a4fb1aab7046d218bd055463fc7e139b202f01802645d786acc7d7907da6fb85"
         }
       ]
     },

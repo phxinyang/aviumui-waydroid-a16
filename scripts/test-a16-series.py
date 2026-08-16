@@ -144,8 +144,8 @@ def validate(repo: Path, applier) -> tuple[dict, dict, dict]:
 
     if (len([p for p in up_patches if p["source"] == "upstream"]), len([p for p in up_patches if p["source"] == "local"])) != (164, 4):
         raise Failure("upstream series classification must be direct=164, manual=4")
-    if (len(rel_patches), len(release["skips"])) != (185, 2):
-        raise Failure("release series must contain 185 actual patches and 2 skips")
+    if (len(rel_patches), len(release["skips"])) != (202, 2):
+        raise Failure("release series must contain 202 actual patches and 2 skips")
     return upstream, release, lock
 
 
@@ -190,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
         _, release, _ = validate(repo, applier)
         if args.aosp_root:
             check_aosp(repo, release, args.aosp_root.expanduser().resolve(), applier)
-        print("A16 series self-check passed: direct=164 manual=4 skip=2 release_patches=185")
+        print("A16 series self-check passed: direct=164 manual=4 skip=2 release_patches=202")
         return 0
     except Exception as exc:
         print(f"test-a16-series: {exc}", file=sys.stderr)

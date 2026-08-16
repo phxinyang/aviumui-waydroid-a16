@@ -1,0 +1,68 @@
+From 66d439b7504f0e8cebf6fded096f21d2c47e2ebe Mon Sep 17 00:00:00 2001
+From: Avium <build@avium.local>
+Date: Sat, 15 Aug 2026 14:44:01 +0000
+Subject: [PATCH] wm: limit freeform caption bypass to default display, exclude
+ bubbles
+
+The freeform bypass in shouldShowAppHandleOrHeader granted the desktop caption
+to every freeform task, including the MiFreeform native mini on virtual
+displays and bubble tasks, regressing the pristine AviumUI presentation.
+Restrict the bypass to DEFAULT_DISPLAY freeform tasks (the recents freeform
+window) and to non-bubble tasks, matching the official bubble exclusion.
+
+Change-Id: I8fe9de68c49e8f5c7ad0c800dee361958c78d7ff
+---
+ .../AppHandleAndHeaderVisibilityHelper.kt     | 29 +++++++++++++++----
+ 1 file changed, 23 insertions(+), 6 deletions(-)
+
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/common/AppHandleAndHeaderVisibilityHelper.kt b/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/common/AppHandleAndHeaderVisibilityHelper.kt
+index e4e2851be6b1..a2f6518fd96d 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/common/AppHandleAndHeaderVisibilityHelper.kt
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/common/AppHandleAndHeaderVisibilityHelper.kt
+@@ -43,6 +43,13 @@ class AppHandleAndHeaderVisibilityHelper(
+ ) {
+     var splitScreenController: SplitScreenController? = null
+ 
++    private fun ActivityManager.RunningTaskInfo.isBubble(): Boolean =
++        if (BubbleAnythingFlagHelper.enableCreateAnyBubble()) {
++            bubbleController.map { it.hasStableBubbleForTask(taskId) }.orElse(false)
++        } else {
++            false
++        }
++
+     /**
+      * Returns, given a task's attribute and its display attribute, whether the app handle/header
+      * should show or not for this task.
+@@ -51,13 +58,23 @@ class AppHandleAndHeaderVisibilityHelper(
+ 
+         // If DisplayController doesn't have it tracked, it could be a private/managed display, so
+         // return false if display is null
+-        val display = displayController.getDisplay(taskInfo.displayId) ?: return false
++        val display = displayController.getDisplay(taskInfo.displayId)
++        android.util.Slog.i("FreeformDbg",
++                "shouldShowAppHandleOrHeader task=" + taskInfo.taskId +
++                " mode=" + taskInfo.windowingMode +
++                " display=" + (display != null))
++        if (display == null) return false
+ 
+-        // AOSP freeform windows always keep the caption/header so they stay movable and
+-        // resizable, regardless of whether the display hosts a full desktop. This restores the
+-        // official freeform behavior while the default display stays desk-less for Waydroid
+-        // coexistence (allowedForDisplay would otherwise block the decor).
+-        if (taskInfo.windowingMode == WINDOWING_MODE_FREEFORM) {
++        // AOSP freeform windows on the default display always keep the caption/header so they
++        // stay movable and resizable, regardless of whether the display hosts a full desktop.
++        // This restores the official freeform behavior while the default display stays desk-less
++        // for Waydroid coexistence (allowedForDisplay would otherwise block the decor).
++        // Freeform tasks elsewhere (MiFreeform native mini on a virtual display, bubbles) keep
++        // the official no-caption presentation.
++        if (taskInfo.windowingMode == WINDOWING_MODE_FREEFORM
++                && taskInfo.displayId == Display.DEFAULT_DISPLAY
++                && !taskInfo.isBubble()
++        ) {
+             return true
+         }
+ 
+-- 
+2.43.0
+
