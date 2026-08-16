@@ -4,7 +4,7 @@
     {
       "path": "frameworks/base",
       "base_tree": "4af36c9bec5cc91b8ace1361731b74e4be18b363",
-      "expected_tree": "c5e2f0bf9083f6ed0bea293f95845e4b7ce823a8",
+      "expected_tree": "349487d5502287ad53a8cab1b24881497d6c83f1",
       "patches": [
         {
           "path": "a16/frameworks-base/0001-wm-per-task-host-window-routing.patch",
@@ -49,13 +49,17 @@
         {
           "path": "a16/frameworks-base/0011-wm-allow-caption-drags-without-desk.patch",
           "sha256": "e1ef41e0d74ae72991815359a7f3f93f12df2de4b3614212583c038ce0a8a0ac"
+        },
+        {
+          "path": "a16/frameworks-base/0012-wm-host-task-skips-desktop-toggle.patch",
+          "sha256": "6d2a4d101cbca784ad32f453ee7a78cf7cb8335067acd3eb877421d2d8267e0a"
         }
       ]
     },
     {
       "path": "hardware/waydroid",
       "base_tree": "62d1bbd926cc744ad8f080cfc91cbfdb9e915264",
-      "expected_tree": "521b19a406972d772deae755e7517632c1773b1c",
+      "expected_tree": "37067deec0dc1ad29ec61fcf564f030e2edb46e5",
       "patches": [
         {
           "path": "a16/hardware-waydroid/0001-framework-routed-hybrid-windows.patch",
@@ -96,6 +100,10 @@
         {
           "path": "a16/hardware-waydroid/0010-hwc-maximized-titlebar-restore.patch",
           "sha256": "54f2b818f6101d0c5fe9a52360c31a016d2d14e20d2dbb79c46675d9b584681e"
+        },
+        {
+          "path": "a16/hardware-waydroid/0011-hwc-maximized-titlebar-restore-move.patch",
+          "sha256": "99fdc40707fdf807ed649d5223da9d395f726117328c4021d065ee805e0ffe7e"
         }
       ]
     },

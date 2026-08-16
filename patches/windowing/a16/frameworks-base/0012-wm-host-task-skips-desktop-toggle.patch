@@ -1,0 +1,82 @@
+From 426cfd93f38c66f9b6e94ca116fa738cecce796b Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Sun, 16 Aug 2026 09:48:54 +0000
+Subject: [PATCH] wm: host task NORMAL/MAXIMIZED skips desktop-mode toggle
+
+The window-state bridge routed host-task NORMAL/MAXIMIZED requests through
+DesktopTasksController.toggleDesktopTaskSize, which saves/removes the
+pre-maximize bounds in DesktopRepository.  With the default display
+desk-less the RESTORE side never completes, so getCurrentState keeps
+returning MAXIMIZED and the bridge re-publishes MAXIMIZED a few seconds
+after a restore, re-maximizing the host window (stuck fullscreen after
+drag-down-to-restore).
+
+Host task geometry is compositor/HWC authority: the separate bounds request
+already resizes the task.  Just publish the requested state back
+(source=HOST) so the HWC state machine acks, and skip the desktop toggle.
+
+Change-Id: I82edb8c496d38a15dfc09d84ca37e896e835640d
+---
+ .../WaydroidTaskWindowStateBridge.kt          | 40 ++++++++-----------
+ 1 file changed, 16 insertions(+), 24 deletions(-)
+
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt
+index 91b4b2681091..cf2f10be34c3 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt
+@@ -446,36 +446,28 @@ internal class WaydroidTaskWindowStateBridge(
+         when (state) {
+             TaskWindowState.MINIMIZED ->
+                 desktopTasksController.minimizeTask(taskInfo, MinimizeReason.KEY_GESTURE)
+-            TaskWindowState.NORMAL ->
++            TaskWindowState.NORMAL, TaskWindowState.MAXIMIZED ->
+                 if (repository.isMinimizedTask(taskId)) {
+                     desktopTasksController.moveTaskToFront(
+                         taskInfo,
+                         unminimizeReason = UnminimizeReason.UNKNOWN,
+                     )
+                 } else {
+-                    desktopTasksController.toggleDesktopTaskSize(
+-                        taskInfo,
+-                        ToggleTaskSizeInteraction(
+-                            direction = ToggleTaskSizeInteraction.Direction.RESTORE,
+-                            source = ToggleTaskSizeInteraction.Source.KEYBOARD_SHORTCUT,
+-                            inputMethod = InputMethod.MOUSE,
+-                        ),
+-                    )
+-                }
+-            TaskWindowState.MAXIMIZED ->
+-                if (repository.isMinimizedTask(taskId)) {
+-                    desktopTasksController.moveTaskToFront(
+-                        taskInfo,
+-                        unminimizeReason = UnminimizeReason.UNKNOWN,
+-                    )
+-                } else {
+-                    desktopTasksController.toggleDesktopTaskSize(
+-                        taskInfo,
+-                        ToggleTaskSizeInteraction(
+-                            direction = ToggleTaskSizeInteraction.Direction.MAXIMIZE,
+-                            source = ToggleTaskSizeInteraction.Source.KEYBOARD_SHORTCUT,
+-                            inputMethod = InputMethod.MOUSE,
+-                        ),
++                    // Host task geometry follows the compositor/HWC: the
++                    // bounds request already resizes the task to the
++                    // maximized/restored size.  Do not run desktop-mode
++                    // toggleDesktopTaskSize — it saves "bounds before
++                    // maximize" in the repository and its RESTORE side never
++                    // completes with the default display desk-less, so the
++                    // framework keeps re-publishing MAXIMIZED and the
++                    // restored window jumps back to fullscreen.
++                    publishState(
++                        taskInfo.taskId,
++                        state,
++                        Rect(),
++                        TaskWindowStateSource.HOST,
++                        generation,
++                        force = true,
+                     )
+                 }
+         }
+-- 
+2.43.0
+

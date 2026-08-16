@@ -1,0 +1,60 @@
+From 657cc7b4f3f45debc8a37ad0d9b9b8686f5cf7e7 Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Sun, 16 Aug 2026 09:38:59 +0000
+Subject: [PATCH] hwcomposer: maximized titlebar drag restores and moves with
+ pointer
+
+xdg_toplevel_unset_maximized alone left the drag dead (no interactive move)
+and a missed state ack froze the window because pending configures were
+suppressed forever.  Now the caption drag on a maximized host window calls
+unset_maximized + move so the restored window follows the pointer, and the
+configure suppression only drops same-size echoes (genuine geometry changes
+always flow through even while a state request is pending).
+---
+ hwcomposer/wayland-hwc.cpp | 20 ++++++++++++++------
+ 1 file changed, 14 insertions(+), 6 deletions(-)
+
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+index 2dfdf7d..569ff46 100644
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -286,9 +286,14 @@ xdg_toplevel_handle_configure(void *data, struct xdg_toplevel *,
+             }
+         }
+         // State reconciliation may suppress an echoed size, but it must
+-        // never suppress the compositor's authoritative resize END.
++        // never suppress the compositor's authoritative resize END or a
++        // genuine geometry change (a stuck state ack would otherwise freeze
++        // the window forever).
++        const bool same_size_echo =
++                width == window->last_queued_task_configure_width
++                && height == window->last_queued_task_configure_height;
+         if (!window->host_task_window_state_request_pending
+-                || !drag_resizing) {
++                || !drag_resizing || !same_size_echo) {
+             window->queue_task_configure(width, height, drag_resizing,
+                     task_state_transition, tiled_changed);
+         }
+@@ -2149,12 +2154,15 @@ bool display::begin_host_titlebar_move(uint32_t serial)
+     active_gesture_task_id = target->taskID;
+     if (target->last_host_maximized) {
+         // A maximized host window: the caption strip drag restores the
+-        // window to its freeform size instead of starting an interactive
+-        // move. That matches the AviumUI expectation "drag the top bar down
+-        // to shrink the window back".
++        // window to its freeform size AND starts an interactive move so the
++        // restored window follows the pointer (standard GNOME titlebar
++        // drag).  Mutter handles unset_maximized + move together; without
++        // the move the drag is dead and a missed state ack can freeze the
++        // window.
+         xdg_toplevel_unset_maximized(target->xdg_toplevel);
++        xdg_toplevel_move(target->xdg_toplevel, seat, serial);
+         ALOGI("TASK_XDG_GESTURE task=%u serial=%u input=pointer aosp_ctrl=0 "
+-                "api=restore edge=0 accepted=1 reason=host-title-strip",
++                "api=restore-move edge=0 accepted=1 reason=host-title-strip",
+                 task_id, serial);
+     } else {
+         xdg_toplevel_move(target->xdg_toplevel, seat, serial);
+-- 
+2.43.0
+
