@@ -4,7 +4,7 @@
     {
       "path": "frameworks/base",
       "base_tree": "4af36c9bec5cc91b8ace1361731b74e4be18b363",
-      "expected_tree": "3dacc5505459e687f87dbbf5731cc3dd32950835",
+      "expected_tree": "1b6a503361dfc5c61f374f9461aa9fa2320e4527",
       "patches": [
         {
           "path": "a16/frameworks-base/0001-wm-per-task-host-window-routing.patch",
@@ -57,6 +57,10 @@
         {
           "path": "a16/frameworks-base/0013-wm-host-state-waits-for-bounds.patch",
           "sha256": "8a87e09e3967f0a0386a0e96da96590d01125a6a1c796333e661efd213802c6e"
+        },
+        {
+          "path": "a16/frameworks-base/0014-wm-enable-decor-desk-less.patch",
+          "sha256": "b237a7c92c5b040098ab15db886dc88e6bf8d6d46b65d46dab856ddcced58f77"
         }
       ]
     },

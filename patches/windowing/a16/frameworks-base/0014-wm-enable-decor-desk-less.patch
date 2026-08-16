@@ -1,0 +1,44 @@
+From 2405ff9a7ae81bb5c36e632b2381d900c0c8ee5e Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Sun, 16 Aug 2026 13:21:25 +0000
+Subject: [PATCH] wm: enable window decorations with desk-less default display
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The Dagger providers gating the desktop-mode window decorations
+(DesktopModeWindowDecorViewModel) key off
+canEnterDesktopModeOrShowAppHandle, which is false once the default display
+is kept desk-less, so no captions / 窗口栏 are created for any task.  Host
+windows therefore have no caption to drag, no top-left menu and no
+fullscreen control.  Override the property in ShellDesktopStateImpl: the
+decoration infrastructure comes up, while the desk root stays gated on
+canEnterDesktopMode (false), and the 0006 visibility gate still limits
+captions to Waydroid host + freeform tasks.
+
+Change-Id: I5b3150bd98008cc9b173c5d326e9dffa2d0418f9
+---
+ .../android/wm/shell/desktopmode/ShellDesktopStateImpl.kt  | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/ShellDesktopStateImpl.kt b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/ShellDesktopStateImpl.kt
+index 56cf945bf20f..05dcbd8a5eab 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/ShellDesktopStateImpl.kt
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/ShellDesktopStateImpl.kt
+@@ -29,6 +29,13 @@ class ShellDesktopStateImpl(
+     private val shellController: ShellController,
+     private val shellTaskOrganizer: ShellTaskOrganizer,
+ ) : ShellDesktopState, DesktopState by desktopState {
++    // Waydroid host windows need the window decorations (caption / 窗口栏,
++    // including the top-left menu and fullscreen control) even while the
++    // default display stays desk-less.  The desk root itself remains gated on
++    // canEnterDesktopMode (false in this build), so this only brings up the
++    // decoration infrastructure.
++    override val canEnterDesktopModeOrShowAppHandle: Boolean = true
++
+     /** Checks if the given display has an active desktop session (i.e., running freeform tasks). */
+     private fun isInDesktop(displayId: Int): Boolean =
+         desktopUserRepositories
+-- 
+2.43.0
+
