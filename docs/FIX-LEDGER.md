@@ -85,17 +85,17 @@
 
 **决策**：前两个问题（选择器启动路由、重复悬浮条）在 App 层修复（框架保持官方）。本条目区别于上面"证伪实验"排除的"叠加式 Avium APK/smali 链"——那是旧窗口工作的实验性堆叠，不是本次"把官方 APK 自身预留的官方路径接上 + 修官方 App 自身 bug"的最小修复。
 
-**问题 1（选择器→自由窗口）**：官方 APK 选择器非气泡分支调 `launchedappforavium`（102 轻量小窗，display 0），类里自带的官方自由窗口路径 `launchAppNormally`（→ FreeformService `com.sunshine.freeform.action.start.intent` → MiFreeform 虚拟显示）是死代码。修复：两个适配器（ChooseAppFloatingAdapter/AllAppsAdapter）非气泡分支改调 `launchAppNormally`。气泡模式与框架不动。`persist.avium.popup_view` 非 bubble 时选应用即进虚拟显示自由窗口。
+**问题 1（选择器→自由窗口，已回退）**：官方 APK 选择器非气泡分支调 `launchedappforavium`（102 轻量小窗，display 0）。曾尝试把两个适配器非气泡分支改调类里预留的 `launchAppNormally`（→ FreeformService → 虚拟显示自由窗口），但用户决定**严格回官方**（选应用→102 小窗，接受跳板 App 逃逸为官方行为）。该改动已从部署 APK 撤除，相关脚本已删除（git 历史保留）。
 
 **问题 A（几何）**：官方尺寸公式 `height = min(realH, realW)/ratio` 假设竖屏；横屏 ROTATION_0 平板算出 2032x3612 虚拟显示、2032x3048 浮窗垂直溢出。修复：`initConfig` 与 `showWindowToMini` 两处 `freeformScreenHeight` 上限为 `getRealScreenHeight()`。真机浮窗回到 677x1204。
 
-**问题 B（双悬浮条）**：真根源是 `ForegroundService.showFloating()` 与 `KeepAliveService`（无障碍保活）各自开机加一个 54x162 悬浮窗。修复：`KeepAliveService.showFloating()` 置空，悬浮条归 ForegroundService。真机开机仅一条。
+**问题 B（双悬浮条，已回退）**：真根源是 `ForegroundService.showFloating()` 与 `KeepAliveService`（无障碍保活）各自开机加一个 54x162 悬浮窗。曾把 `KeepAliveService.showFloating()` 置空；用户决定**回官方**，改为不启用该无障碍服务（`accessibility_enabled=0`）即可单条。
 
-**问题 C（showWindow 幂等）**：showWindow 先 type 2032 加窗、删后以 2038 重加，删除失败留旧窗；入口先 detach 本视图旧窗口（防御）。
+**问题 C（showWindow 幂等，已回退）**：防御性补丁，未观察到实际出错；用户决定回官方，已撤除。
 
 **问题 D（旋转方向误判，侧边栏超大窗口真根因）**：App 用 `screenRotation` 判方向（ROTATION_0/2=竖屏）。平板物理横屏（3048x2032）但报 ROTATION_0 → App 当竖屏，`getRealScreenHeight()` 返回 max(w,h)=3048、`getRealScreenWidth()` 返回 min=2032，所有自由窗口/浮窗尺寸都按这个交换值算 → 侧边栏打开的应用窗口 2032x3048 垂直溢出（用户实测 uu 远程）。修复三处：`getRealScreenHeight/Width` 直接返回窗口物理高/宽（不再按旋转交换）；`FreeformHelper.screenIsPortrait` 改为按实际宽高判断（宽>高即横屏）。真机浮窗回到 1016x1806（9:16 竖窗、居中、适配屏幕）。
 
-**产物与复现**：`scripts/patch-avium-freeform-chooser.py`（classes4.dex，选择器）、`scripts/patch-avium-freeform-geometry-dedup.py`（classes15.dex FreeformView/FreeformHelper + classes5.dex KeepAliveService）。官方 APK `4fd97ba0…` → chooser 版 `4be2ab25…` → 几何版 `23e02d61…` → 方向修复版 `7edca1d2…`（已部署平板，overlay `/var/lib/waydroid/overlay/system/system_ext/app/AviumFreeWindow/`）。归档 `out/avium-freeform-chooser-freeform-20260816/`（out/ 为 gitignore）。
+**最终定版（用户拍板）**：1/3/4 全部回官方，只保留 2（官方公式 + 修正横屏检测）。`scripts/patch-avium-freeform-orientation.py` 从官方 APK 直接产出 `2a1c9eae…`（已部署平板，overlay `/var/lib/waydroid/overlay/system/system_ext/app/AviumFreeWindow/`）。归档 `out/avium-freeform-chooser-freeform-20260816/`（out/ 为 gitignore）。中间版本 `4be2ab25/23e02d61/7edca1d2` 仅存于 git/归档。
 
 **真机验证**：开机仅 1 条悬浮条；`LAUNCHER_MINI_WINDOW` 广播启动 mark.via → 浮窗 677x1204（适配）、任务在 Display #2。侧边栏路径（ForegroundService → ChooseAppFloatingView → launchAppNormally → ACTION_START_INTENT）与广播同路径，待用户实测确认。
 
