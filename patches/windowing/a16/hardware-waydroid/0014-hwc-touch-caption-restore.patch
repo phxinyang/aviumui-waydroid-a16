@@ -1,0 +1,130 @@
+From b036d7144cb6991f1fa9ddeba384af3c87d6efc8 Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Sun, 16 Aug 2026 13:08:56 +0000
+Subject: [PATCH] hwcomposer: touch caption strip starts host restore/move
+
+The host title-bar drag was pointer-only; touch always forwarded to Android,
+and with the desk-less decor infra off there is no Android caption to
+initiate the framework drag, so a touch swipe on a maximized host window
+never started.  Add begin_host_titlebar_touch mirroring the pointer path:
+touch on the caption strip claims the sequence and does unset_maximized +
+move (maximized) or move (freeform).
+---
+ hwcomposer/wayland-hwc.cpp | 79 ++++++++++++++++++++++++++++++++++++++
+ hwcomposer/wayland-hwc.h   |  3 ++
+ 2 files changed, 82 insertions(+)
+
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+index 1bce53c..f72e1a6 100644
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -1827,6 +1827,15 @@ touch_handle_down(void *data, struct wl_touch *,
+     x += input_frame.x;
+     y += input_frame.y;
+ 
++    // A touch on the host caption strip owns the restore/move gesture,
++    // mirroring the pointer caption drag (the framework has no caption to
++    // initiate the drag itself while the desk-less decor infra is off).
++    if (display->begin_host_titlebar_touch(x, y, serial, surface)) {
++        forward_to_android = false;
++    }
++    if (!forward_to_android)
++        return;
++
+     ADD_EVENT(EV_ABS, ABS_MT_SLOT, touch_id);
+     ADD_EVENT(EV_ABS, ABS_MT_TRACKING_ID, touch_id);
+     ADD_EVENT(EV_ABS, ABS_MT_POSITION_X, x);
+@@ -2098,6 +2107,76 @@ bool display::begin_task_window_drag(uint32_t task_id, uint32_t ctrl_type)
+     return true;
+ }
+ 
++bool display::begin_host_titlebar_touch(int32_t display_x,
++        int32_t display_y, uint32_t serial, struct wl_surface *surface)
++{
++    if (!seat)
++        return false;
++    const int caption_height = host_caption_height_px(this);
++    std::scoped_lock input_lock(input_state_mutex);
++    const auto layer_it = layers.find(surface);
++    if (layer_it == layers.end() || !layer_it->second.owner_window) {
++        ALOGI("HOST_TITLEBAR_TOUCH_REJECT reason=no-layer surface=%p",
++                static_cast<void *>(surface));
++        return false;
++    }
++    window *target = layer_it->second.owner_window;
++    if (!target->xdg_toplevel || !target->task_bounds_valid) {
++        ALOGI("HOST_TITLEBAR_TOUCH_REJECT task=%s reason=no-toplevel-or-bounds",
++                target->taskID.c_str());
++        return false;
++    }
++    if (display_y < target->task_top
++            || display_y >= target->task_top + caption_height) {
++        ALOGI("HOST_TITLEBAR_TOUCH_REJECT task=%s reason=outside-caption "
++                "display_y=%d task_top=%d caption=%d",
++                target->taskID.c_str(), display_y, target->task_top,
++                caption_height);
++        return false;
++    }
++    uint32_t task_id = 0;
++    if (!target->get_numeric_task_id(&task_id)) {
++        ALOGI("HOST_TITLEBAR_TOUCH_REJECT task=%s reason=bad-task-id",
++                target->taskID.c_str());
++        return false;
++    }
++    task_window_route route;
++    if (!get_task_window_route(task_id, &route) || !route.enabled) {
++        ALOGI("HOST_TITLEBAR_TOUCH_REJECT task=%u reason=route-disabled",
++                task_id);
++        return false;
++    }
++    if (!touch_down_active || touch_gesture_task_id != target->taskID
++            || touch_sequence_owner != input_sequence_owner::Android) {
++        ALOGI("HOST_TITLEBAR_TOUCH_REJECT task=%s reason=sequence mismatch "
++                "down=%d gesture=%s owner=%d",
++                target->taskID.c_str(), static_cast<int>(touch_down_active),
++                touch_gesture_task_id.c_str(),
++                static_cast<int>(touch_sequence_owner));
++        return false;
++    }
++    if (!active_gesture_task_id.empty()) {
++        ALOGI("HOST_TITLEBAR_TOUCH_REJECT task=%s reason=gesture-busy active=%s",
++                target->taskID.c_str(), active_gesture_task_id.c_str());
++        return false;
++    }
++    touch_sequence_owner = input_sequence_owner::Wayland;
++    active_gesture_task_id = target->taskID;
++    if (target->last_host_maximized) {
++        xdg_toplevel_unset_maximized(target->xdg_toplevel);
++        xdg_toplevel_move(target->xdg_toplevel, seat, serial);
++        ALOGI("TASK_XDG_GESTURE task=%u serial=%u input=touch aosp_ctrl=0 "
++                "api=restore-move edge=0 accepted=1 reason=host-title-strip",
++                task_id, serial);
++    } else {
++        xdg_toplevel_move(target->xdg_toplevel, seat, serial);
++        ALOGI("TASK_XDG_GESTURE task=%u serial=%u input=touch aosp_ctrl=0 "
++                "api=move edge=0 accepted=1 reason=host-title-strip",
++                task_id, serial);
++    }
++    return true;
++}
++
+ bool display::begin_host_titlebar_move(uint32_t serial)
+ {
+     if (!seat) {
+diff --git a/hwcomposer/wayland-hwc.h b/hwcomposer/wayland-hwc.h
+index 004f58a..dba924c 100644
+--- a/hwcomposer/wayland-hwc.h
++++ b/hwcomposer/wayland-hwc.h
+@@ -622,6 +622,9 @@ struct display {
+     void stop_task_command_worker();
+     bool begin_task_window_drag(uint32_t task_id, uint32_t ctrl_type);
+     bool begin_host_titlebar_move(uint32_t serial);
++    bool begin_host_titlebar_touch(int32_t display_x, int32_t display_y,
++            uint32_t serial, struct wl_surface *surface);
++
+     uint64_t enqueue_task_focus(uint32_t task_id);
+     uint64_t enqueue_task_remove(uint32_t task_id);
+     uint64_t enqueue_task_resize(uint32_t task_id, int32_t left,
+-- 
+2.43.0
+
