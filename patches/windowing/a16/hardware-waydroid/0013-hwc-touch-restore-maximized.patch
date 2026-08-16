@@ -1,0 +1,36 @@
+From 67f00b655ce20157f4d73a630944b3f45d3c18bb Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Sun, 16 Aug 2026 12:49:38 +0000
+Subject: [PATCH] hwcomposer: touch drag on maximized host window restores too
+
+begin_task_window_drag (the AOSP/touch gesture path) only called
+xdg_toplevel_move, so dragging down on a maximized host window never left
+the maximized state and the framework kept re-publishing MAXIMIZED.  Apply
+the same unset_maximized + move the caption-strip path uses.
+---
+ hwcomposer/wayland-hwc.cpp | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+index 4de362e..1bce53c 100644
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -2078,6 +2078,15 @@ bool display::begin_task_window_drag(uint32_t task_id, uint32_t ctrl_type)
+ 
+     const char *api = "move";
+     if (ctrl_type == 0) {
++        if (target->last_host_maximized) {
++            // A maximized host window: restore it first so the move follows
++            // the pointer back to a freeform window (same semantics as the
++            // caption-strip drag).  A bare xdg_toplevel_move leaves mutter's
++            // maximize state intact and the framework keeps re-publishing
++            // MAXIMIZED, so the window never shrinks.
++            xdg_toplevel_unset_maximized(target->xdg_toplevel);
++            api = "restore-move";
++        }
+         xdg_toplevel_move(target->xdg_toplevel, seat, serial);
+     } else {
+         api = "resize";
+-- 
+2.43.0
+

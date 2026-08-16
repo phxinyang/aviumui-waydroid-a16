@@ -1,0 +1,60 @@
+From cc1a5d454a42f1d9f2af1d391a02ff2680616215 Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Sun, 16 Aug 2026 10:26:29 +0000
+Subject: [PATCH] hwcomposer: restore freeform origin after maximize
+
+---
+ hwcomposer/wayland-hwc.cpp | 18 ++++++++++++++++--
+ hwcomposer/wayland-hwc.h   |  7 +++++++
+ 2 files changed, 23 insertions(+), 2 deletions(-)
+
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+index 569ff46..4de362e 100644
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -710,8 +710,22 @@ void window::handle_task_configure(int32_t width, int32_t height) {
+     // display; it must not keep the freeform task origin (which would push
+     // the task out of the display and break the caption strip hit test).
+     const bool maximizing = last_host_maximized;
+-    const int origin_x = maximizing ? 0 : task_left;
+-    const int origin_y = maximizing ? 0 : task_top;
++    // Capture the freeform origin on the maximize transition (before the
++    // full-display bounds request overwrites task_left/top) so a later
++    // restore puts the task back where the compositor restored the window.
++    if (maximizing && !freeform_task_origin_valid) {
++        freeform_task_left = task_left;
++        freeform_task_top = task_top;
++        freeform_task_origin_valid = true;
++    }
++    const int origin_x = maximizing ? 0
++            : (freeform_task_origin_valid ? freeform_task_left : task_left);
++    const int origin_y = maximizing ? 0
++            : (freeform_task_origin_valid ? freeform_task_top : task_top);
++    // Re-arm only after the restore configure has used the saved origin.
++    if (!maximizing) {
++        freeform_task_origin_valid = false;
++    }
+     const task_window_bounds bounds = {origin_x, origin_y,
+             origin_x + physical_width, origin_y + physical_height};
+     const uint64_t generation = display->enqueue_task_window_bounds_request(
+diff --git a/hwcomposer/wayland-hwc.h b/hwcomposer/wayland-hwc.h
+index 3c17d4d..004f58a 100644
+--- a/hwcomposer/wayland-hwc.h
++++ b/hwcomposer/wayland-hwc.h
+@@ -306,6 +306,13 @@ struct window {
+     int task_right = 0;
+     int task_bottom = 0;
+     bool task_bounds_valid = false;
++    // Freeform origin captured when the host window maximized.  The
++    // full-display bounds request overwrites task_left/top with 0, so the
++    // origin is saved here and re-applied on restore, keeping the Android
++    // task aligned with the compositor-restored window (and its caption).
++    int freeform_task_left = 0;
++    int freeform_task_top = 0;
++    bool freeform_task_origin_valid = false;
+     // This surface's own host→Android scale, from the compositor's
+     // fractional-scale report for this window. The global display->scale is
+     // shared by every window and flaps between the full-UI carrier (4x) and
+-- 
+2.43.0
+

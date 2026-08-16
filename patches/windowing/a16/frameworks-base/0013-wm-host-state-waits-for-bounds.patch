@@ -1,0 +1,72 @@
+From a9649c4eb175fdfea64259004d0ab419e3b61815 Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Sun, 16 Aug 2026 10:26:36 +0000
+Subject: [PATCH] wm: host task state waits for bounds, no desktop toggle
+
+Change-Id: Ic1d1e9e0fee0cb95c1c1b9952d1999a2a3f567be
+---
+ .../WaydroidTaskWindowStateBridge.kt          | 27 ++++++++-----------
+ 1 file changed, 11 insertions(+), 16 deletions(-)
+
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt
+index cf2f10be34c3..54a9fe9b5656 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt
+@@ -204,21 +204,14 @@ internal class WaydroidTaskWindowStateBridge(
+             return
+         }
+ 
+-        val repository = userRepositories.getProfile(taskInfo.userId)
+-        if (
+-            pending.state == TaskWindowState.MAXIMIZED &&
+-                currentState == TaskWindowState.NORMAL &&
+-                !repository.isMinimizedTask(taskInfo.taskId)
+-        ) {
+-            desktopTasksController.toggleDesktopTaskSize(
+-                taskInfo,
+-                ToggleTaskSizeInteraction(
+-                    direction = ToggleTaskSizeInteraction.Direction.MAXIMIZE,
+-                    source = ToggleTaskSizeInteraction.Source.KEYBOARD_SHORTCUT,
+-                    inputMethod = InputMethod.MOUSE,
+-                ),
+-            )
+-        }
++        // Host task geometry is compositor/HWC authority: the bounds
++        // request already resizes the task.  Do not run desktop-mode
++        // toggleDesktopTaskSize here; it records "bounds before maximize"
++        // and its RESTORE side never completes with the default display
++        // desk-less, which makes the framework re-publish a conflicting
++        // state.  Wait for the bounds request to settle, then the
++        // currentState == pending.state branch above confirms and clears
++        // the pending request.
+     }
+ 
+     private fun isHostWindowTask(taskInfo: RunningTaskInfo): Boolean =
+@@ -468,6 +461,7 @@ internal class WaydroidTaskWindowStateBridge(
+                         TaskWindowStateSource.HOST,
+                         generation,
+                         force = true,
++                        clearPending = false,
+                     )
+                 }
+         }
+@@ -562,6 +556,7 @@ internal class WaydroidTaskWindowStateBridge(
+         source: Int,
+         generation: Long,
+         force: Boolean = false,
++        clearPending: Boolean = true,
+     ) {
+         val snapshot = StateSnapshot(state, Rect(restoreBounds))
+         if (!force && lastPublishedByTaskId[taskId] == snapshot) return
+@@ -580,7 +575,7 @@ internal class WaydroidTaskWindowStateBridge(
+         try {
+             if (service.setTaskWindowState(taskId, state, bounds, source, generation)) {
+                 lastPublishedByTaskId[taskId] = snapshot
+-                if (source == TaskWindowStateSource.HOST) {
++                if (source == TaskWindowStateSource.HOST && clearPending) {
+                     pendingHostRequestByTaskId.remove(taskId)
+                 }
+             } else {
+-- 
+2.43.0
+
