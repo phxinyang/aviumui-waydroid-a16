@@ -1,0 +1,39 @@
+From 32b24b8f575b6202efa7fcd253ada2fddd2d8a5c Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Mon, 17 Aug 2026 08:00:06 +0000
+Subject: [PATCH] wm: reconnect host bridge after callback loss
+
+Change-Id: I1eae7190cef97450099f4d199d4e6851b2f7a2aa
+---
+ .../shell/desktopmode/WaydroidTaskWindowStateBridge.kt | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt
+index ac2857b766e7..dc725bad2265 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt
+@@ -642,12 +642,22 @@ internal class WaydroidTaskWindowStateBridge(
+                 }
+             } else {
+                 Slog.w(TAG, "Waydroid rejected task=$taskId state=$state gen=$generation")
++                if (waydroidWindow === service) {
++                    waydroidWindow = null
++                    lastPublishedByTaskId.clear()
++                    lastPublishedRouteByTaskId.clear()
++                    lastHostBoundsGenerationByTaskId.clear()
++                    synchronized(hostBoundsLock) { pendingHostBoundsByTaskId.clear() }
++                    scheduleReconnect()
++                }
+             }
+         } catch (e: RemoteException) {
+             Slog.w(TAG, "Failed to publish task=$taskId state=$state", e)
+             waydroidWindow = null
+             lastPublishedByTaskId.clear()
+             lastPublishedRouteByTaskId.clear()
++            lastHostBoundsGenerationByTaskId.clear()
++            synchronized(hostBoundsLock) { pendingHostBoundsByTaskId.clear() }
+             scheduleReconnect()
+         }
+     }
+-- 
+2.43.0

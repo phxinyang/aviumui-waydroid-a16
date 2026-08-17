@@ -1,0 +1,27 @@
+From 58e785589a01e9f73b53b1d53dba26125d0867a5 Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Mon, 17 Aug 2026 08:11:30 +0000
+Subject: [PATCH] wm: remove freeform debug logging
+
+Change-Id: I0a852a717daa28bcd9a4b363b2f62e13d7b3b614
+---
+ .../windowdecor/common/AppHandleAndHeaderVisibilityHelper.kt  | 4 ----
+ 1 file changed, 4 deletions(-)
+
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/common/AppHandleAndHeaderVisibilityHelper.kt b/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/common/AppHandleAndHeaderVisibilityHelper.kt
+index a2f6518fd96d..1e3ab7618aed 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/common/AppHandleAndHeaderVisibilityHelper.kt
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/common/AppHandleAndHeaderVisibilityHelper.kt
+@@ -59,10 +59,6 @@ class AppHandleAndHeaderVisibilityHelper(
+         // If DisplayController doesn't have it tracked, it could be a private/managed display, so
+         // return false if display is null
+         val display = displayController.getDisplay(taskInfo.displayId)
+-        android.util.Slog.i("FreeformDbg",
+-                "shouldShowAppHandleOrHeader task=" + taskInfo.taskId +
+-                " mode=" + taskInfo.windowingMode +
+-                " display=" + (display != null))
+         if (display == null) return false
+ 
+         // AOSP freeform windows on the default display always keep the caption/header so they
+-- 
+2.43.0

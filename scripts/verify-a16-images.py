@@ -580,6 +580,14 @@ def main(argv: list[str] | None = None) -> int:
         window_patches = window_patch_state(window_patch_root, window_series)
         projects = source_state(root, lock, series, window_series)
         images = image_state(root, product_name)
+        # build-context timestamps are second-precision; allow the image mtime
+        # to land within that final second without accepting an older context.
+        finished_ns = int(finished_datetime.timestamp() * 1_000_000_000) + 1_000_000_000
+        for name, image in images.items():
+            if image["mtime_ns"] > finished_ns:
+                raise VerifyError(
+                    f"{name}.img is newer than finished-at; build provenance is stale"
+                )
         payload = {
             "schema_version": 1,
             "product": args.product,

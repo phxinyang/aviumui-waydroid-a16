@@ -4,7 +4,7 @@
     {
       "path": "frameworks/base",
       "base_tree": "4af36c9bec5cc91b8ace1361731b74e4be18b363",
-      "expected_tree": "07a5a640e200c214b8ba26084da7ff3bd93fbb0f",
+      "expected_tree": "d47c1029dce3b72a87288a4e3031451482b27759",
       "patches": [
         {
           "path": "a16/frameworks-base/0001-wm-per-task-host-window-routing.patch",
@@ -65,13 +65,21 @@
         {
           "path": "a16/frameworks-base/0015-wm-host-fullscreen-restore.patch",
           "sha256": "566c12f5490945c0ae370a1542a538bc7d1a691c1107a6a14e0693293d9b7706"
+        },
+        {
+          "path": "a16/frameworks-base/0016-wm-reconnect-host-bridge-after-callback-loss.patch",
+          "sha256": "9a013bfcbce57ab756c507e7630191a18032abf2c6712e8007303583fe4462dc"
+        },
+        {
+          "path": "a16/frameworks-base/0017-wm-remove-freeform-debug-logging.patch",
+          "sha256": "a420dab8532caf4612e50aa442f7457fca57dae3a5b0494df9ce7ebdb7c924da"
         }
       ]
     },
     {
       "path": "hardware/waydroid",
       "base_tree": "62d1bbd926cc744ad8f080cfc91cbfdb9e915264",
-      "expected_tree": "57418c1820d4801c2592028a47f0793517eb6468",
+      "expected_tree": "0559a57c91266e5f7824d022cc22ff928de1791d",
       "patches": [
         {
           "path": "a16/hardware-waydroid/0001-framework-routed-hybrid-windows.patch",
@@ -132,6 +140,10 @@
         {
           "path": "a16/hardware-waydroid/0015-hwc-caption-drag-only.patch",
           "sha256": "4f3548ba984318ce6ea430b97f92c0961a5307d39c8bd951ee3824fd230dc38e"
+        },
+        {
+          "path": "a16/hardware-waydroid/0016-hwc-reconnect-dead-task-window-callback.patch",
+          "sha256": "1b0bee235f6890098469c88638a182c1952fffbdadf22285374df52d19b2259a"
         }
       ]
     },

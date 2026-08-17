@@ -1,0 +1,48 @@
+From ef3e92046c6eabbb42bbee3fe20910a81f0ed78c Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Mon, 17 Aug 2026 08:23:06 +0000
+Subject: [PATCH] hwc: reconnect callbacks and release retired windows
+---
+ hwcomposer/WaydroidWindow.cpp | 5 +++++
+ hwcomposer/wayland-hwc.cpp    | 9 +++++++--
+ 2 files changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/hwcomposer/WaydroidWindow.cpp b/hwcomposer/WaydroidWindow.cpp
+index 02ad7e4..1df92d9 100644
+--- a/hwcomposer/WaydroidWindow.cpp
++++ b/hwcomposer/WaydroidWindow.cpp
+@@ -230,6 +230,11 @@ Return<bool> WaydroidWindow::setTaskWindowState(uint32_t taskID,
+         default:
+             return false;
+     }
++    {
++        std::scoped_lock lock(mTaskWindowCallbackMutex);
++        if (mTaskWindowCallback == nullptr)
++            return false;
++    }
+     return mDisplay->queue_task_window_state(update);
+ }
+
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+index b1aa9a5..6b79265 100644
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -3655,9 +3655,14 @@ void display::retire_window(std::unique_ptr<window> retired) {
+         return;
+     struct wl_callback *callback = wl_display_sync(display);
+     if (!callback) {
+-        std::scoped_lock lock(retired_windows_mutex);
+-        retirement_sync_pending = false;
++        std::vector<std::unique_ptr<window>> abandoned;
++        {
++            std::scoped_lock lock(retired_windows_mutex);
++            retirement_sync_pending = false;
++            abandoned.swap(retired_windows);
++        }
+         ALOGE("failed to schedule Wayland window retirement");
++        abandoned.clear();
+         return;
+     }
+     wl_callback_add_listener(callback, &retired_windows_sync_listener, this);
+-- 
+2.43.0

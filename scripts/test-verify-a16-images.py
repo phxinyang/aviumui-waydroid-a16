@@ -6,6 +6,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -123,6 +124,9 @@ def fixture() -> Iterator[
         vendor = product / "vendor.img"
         system.write_bytes(b"system image\n")
         vendor.write_bytes(b"vendor image\n")
+        image_mtime = 1786321800
+        os.utime(system, (image_mtime, image_mtime))
+        os.utime(vendor, (image_mtime, image_mtime))
         lock = root / "lock.json"
         lock.write_text(
             json.dumps(
@@ -299,6 +303,10 @@ def empty_system(root: Path, lock: Path, series: Path, window_series: Path, patc
     system.write_bytes(b"")
 
 
+def image_newer_than_finished(root: Path, lock: Path, series: Path, window_series: Path, patch_root: Path, system: Path) -> None:
+    os.utime(system, (1786325400, 1786325400))
+
+
 def symlink_system(root: Path, lock: Path, series: Path, window_series: Path, patch_root: Path, system: Path) -> None:
     target = root / "outside-system.img"
     target.write_bytes(b"outside")
@@ -361,6 +369,7 @@ def assert_failures() -> None:
     assert_failure(wrong_series_tree, "window base tree mismatch")
     assert_failure(missing_system, "system.img")
     assert_failure(empty_system, "non-empty")
+    assert_failure(image_newer_than_finished, "provenance is stale")
     assert_failure(symlink_system, "symlink")
     assert_failure(wrong_manifest, "manifest repository HEAD mismatch")
     assert_failure(dirty_manifest, "manifest repository is dirty")
