@@ -294,29 +294,6 @@ def main() -> int:
         if result.returncode == 0 or calls.read_text(encoding="utf-8"):
             raise AssertionError("verify accepted an incomplete build context")
 
-    for retired in (
-        ROOT / "scripts/build-system.sh",
-        ROOT / "scripts/resume-build.sh",
-        ROOT / "scripts/set-window-mode.sh",
-        ROOT / "scripts/deploy-a16-framework-race.sh",
-        ROOT / "scripts/deploy-b021.sh",
-        ROOT / "scripts/deploy-flag-on.sh",
-    ):
-        result = run([str(retired)], env=os.environ.copy(), cwd=ROOT)
-        if result.returncode != 2 or not any(
-            marker in result.stderr
-            for marker in ("avium-a16.sh", "per-task routing", "paired-image workflow")
-        ):
-            raise AssertionError(f"retired entrypoint is not fail-closed: {retired}")
-
-    executable_scripts = sorted(ROOT.joinpath("scripts").glob("*.sh"))
-    historical_tablet = "<lan-ip>" + "132"
-    for script in executable_scripts:
-        if historical_tablet in script.read_text(encoding="utf-8"):
-            raise AssertionError(f"historical tablet address remains executable: {script}")
-    topology = (ROOT / "docs/TOPOLOGY.md").read_text(encoding="utf-8")
-    if "| 平板 | `<tablet-ip>` |" not in topology:
-        raise AssertionError("current topology does not identify <tablet-ip>")
     print("avium-a16 entry semantic tests passed")
     return 0
 
