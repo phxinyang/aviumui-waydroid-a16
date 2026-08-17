@@ -86,6 +86,10 @@
 
 以下方案排除出正式设计：旧 `services.jar` 热补丁、叠加式 Avium APK/smali 链、RawName/包名/Caption 顺序推断 task、substring 黑名单、固定 min/max 尺寸、按 bounds/display 变化迁移 task、全局 `forceResizable`，以及 `set-window-mode.sh` 的 android/compat/native 三选一模式。native 黑屏实验和旧镜像也不是产品入口。具体文件索引见 [`docs/ARCHIVE.md`](ARCHIVE.md)。
 
+| 尝试 | 结果 | 结论 |
+| --- | --- | --- |
+| 给 `services/proguard.flags` 加 keep 规则让 R8 保留 `id.waydro.server.WayDroidService`（window series 0018），期望补上“缺失”的 Waydroid 框架服务 | 部署后 Waydroid 打不开（show-full-ui `Failed with code: -1`），GNOME 应用图标被清空。根因：镜像里已有 LineageOS 版 `org.lineageos.platform.internal.WayDroidService` 发布同名 binder 服务 `waydroidplatform`（`lineageos.waydroid.IPlatform` 接口，主机 waydroid 1.6.3 匹配）；id.waydro 版启动后用 `id.waydro.waydroid.IPlatform` 接口覆盖了它，主机工具 setprop/getAppsInfo 全部失败，HWC 收不到 `active_apps=Waydroid` 不显示窗口，user_manager 因拿不到应用列表清空 `.desktop` 图标 | 已 revert（`f5ffc4b`）。`id.waydro` 版不该启动——LineageOS 版才是本镜像正确的 Waydroid 框架服务；`service class not found` 报错是该类被 R8 剥离的正常结果，不是缺陷 |
+
 ## AviumFreeWindow APK 层修复（2026-08-16，用户确认方向）
 
 **决策**：前两个问题（选择器启动路由、重复悬浮条）在 App 层修复（框架保持官方）。本条目区别于上面"证伪实验"排除的"叠加式 Avium APK/smali 链"——那是旧窗口工作的实验性堆叠，不是本次"把官方 APK 自身预留的官方路径接上 + 修官方 App 自身 bug"的最小修复。
