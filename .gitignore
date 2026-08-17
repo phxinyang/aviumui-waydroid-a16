@@ -4,6 +4,12 @@
 *.img
 *.img.bak-*
 
+# 设备证据（截图/日志/APK/运行时 dump，体积大且含设备现场信息，不进仓库）
+/evidence/
+
+# 历史归档（已证伪/淘汰的补丁与实验，仅本地留存）
+/archive/
+
 # 官方引用源码（本地只读 clone，不进 Git）
 references/src/
 
@@ -13,6 +19,9 @@ references/src/
 ccache/
 __pycache__/
 *.py[cod]
+
+# 本地远程调试脚本（与正式 scripts/ 重复，不发布）
+/.remote-scripts/
 
 # 会话与本地杂项
 .history
