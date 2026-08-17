@@ -4,7 +4,7 @@
     {
       "path": "frameworks/base",
       "base_tree": "4af36c9bec5cc91b8ace1361731b74e4be18b363",
-      "expected_tree": "897399d322da3597cc393549e8fa7cb7089987bc",
+      "expected_tree": "d47c1029dce3b72a87288a4e3031451482b27759",
       "patches": [
         {
           "path": "a16/frameworks-base/0001-wm-per-task-host-window-routing.patch",
@@ -73,10 +73,6 @@
         {
           "path": "a16/frameworks-base/0017-wm-remove-freeform-debug-logging.patch",
           "sha256": "a420dab8532caf4612e50aa442f7457fca57dae3a5b0494df9ce7ebdb7c924da"
-        },
-        {
-          "path": "a16/frameworks-base/0018-wm-keep-waydroid-framework-services.patch",
-          "sha256": "c39cef38667d0531dd0aae393cea98bb5551b133345a4f7af7a74fbcb501137c"
         }
       ]
     },
