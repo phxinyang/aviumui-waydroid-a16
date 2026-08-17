@@ -4,7 +4,7 @@
     {
       "path": "frameworks/base",
       "base_tree": "4af36c9bec5cc91b8ace1361731b74e4be18b363",
-      "expected_tree": "1b6a503361dfc5c61f374f9461aa9fa2320e4527",
+      "expected_tree": "07a5a640e200c214b8ba26084da7ff3bd93fbb0f",
       "patches": [
         {
           "path": "a16/frameworks-base/0001-wm-per-task-host-window-routing.patch",
@@ -61,6 +61,10 @@
         {
           "path": "a16/frameworks-base/0014-wm-enable-decor-desk-less.patch",
           "sha256": "b237a7c92c5b040098ab15db886dc88e6bf8d6d46b65d46dab856ddcced58f77"
+        },
+        {
+          "path": "a16/frameworks-base/0015-wm-host-fullscreen-restore.patch",
+          "sha256": "566c12f5490945c0ae370a1542a538bc7d1a691c1107a6a14e0693293d9b7706"
         }
       ]
     },

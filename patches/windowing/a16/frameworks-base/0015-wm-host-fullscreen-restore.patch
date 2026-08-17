@@ -1,0 +1,197 @@
+From fe3d26ce3cced5c51ecc73be018222870a4e2ef2 Mon Sep 17 00:00:00 2001
+From: Avium A16 Reproducer <avium-a16-reproducer@example.invalid>
+Date: Mon, 17 Aug 2026 03:28:14 +0000
+Subject: [PATCH] wm: host fullscreen tasks keep the drag-restore protocol
+
+The window-state bridge only handled FREEFORM host tasks, so entering fullscreen through the caption fullscreen button left the HWC without MAXIMIZED state: dragging the top white strip only moved the window and never restored it to a freeform window with the window bar.
+
+Treat FULLSCREEN-mode host tasks like maximized tasks in the bridge: publish MAXIMIZED on fullscreen entry (with saved freeform bounds), and on NORMAL from the strip drag, move the task back to FREEFORM with restored bounds before acking. Host xdg geometry stays authoritative and the desk-less default display is preserved.
+
+Change-Id: If2b345be9d30e2d42d4bc3bfac592ffb944ba626
+---
+ .../desktopmode/DesktopTasksController.kt     | 30 ++++++++
+ .../WaydroidTaskWindowStateBridge.kt          | 72 +++++++++++++++++--
+ 2 files changed, 97 insertions(+), 5 deletions(-)
+
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt
+index ac9be19c8950..fa3fbf4780c0 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/DesktopTasksController.kt
+@@ -6456,6 +6456,36 @@ class DesktopTasksController(
+         )
+     }
+ 
++    /**
++     * Restores a Waydroid host task that is currently in fullscreen mode back
++     * to a freeform window.  The host compositor/HWC is the geometry
++     * authority for host windows, so this mirrors the fullscreen entry
++     * transition: switch the task's windowing mode back to FREEFORM and apply
++     * the restored bounds in one transaction (the desk-less default display
++     * has no desk to route through, so the desktop-mode restore helpers are
++     * not usable here).
++     */
++    fun restoreWaydroidHostTaskFromFullscreen(
++        taskInfo: RunningTaskInfo,
++        restoreBounds: Rect,
++    ) {
++        logV(
++            "restoreWaydroidHostTaskFromFullscreen taskId=%d restoreBounds=%s",
++            taskInfo.taskId,
++            restoreBounds,
++        )
++        val wct = WindowContainerTransaction()
++        wct.setWindowingMode(taskInfo.token, WINDOWING_MODE_FREEFORM)
++        if (!restoreBounds.isEmpty) {
++            wct.setBounds(taskInfo.token, restoreBounds)
++        }
++        transitions.startTransition(
++            TRANSIT_CHANGE,
++            wct,
++            windowDragTransitionHandler,
++        )
++    }
++
+     /** Called when a task's info changes. */
+     fun onTaskInfoChanged(taskInfo: RunningTaskInfo) {
+         if (!DesktopModeFlags.ENABLE_FULLY_IMMERSIVE_IN_DESKTOP.isTrue) return
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt
+index 54a9fe9b5656..ac2857b766e7 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/WaydroidTaskWindowStateBridge.kt
+@@ -12,6 +12,7 @@ package com.android.wm.shell.desktopmode
+ 
+ import android.app.ActivityManager.RunningTaskInfo
+ import android.app.WindowConfiguration.WINDOWING_MODE_FREEFORM
++import android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN
+ import android.graphics.Rect
+ import android.os.IHwBinder
+ import android.os.RemoteException
+@@ -72,6 +73,7 @@ internal class WaydroidTaskWindowStateBridge(
+     private var hostBoundsDrainScheduled = false
+     private val lastHostBoundsGenerationByTaskId = mutableMapOf<Int, Long>()
+     private val hostDragResizingTaskIds = mutableSetOf<Int>()
++    private val lastHostWindowingModeByTaskId = mutableMapOf<Int, Int>()
+ 
+     private val taskAppearedListener =
+         object : ShellTaskOrganizer.TaskAppearedListener {
+@@ -180,13 +182,34 @@ internal class WaydroidTaskWindowStateBridge(
+ 
+     private fun handleTaskInfo(taskInfo: RunningTaskInfo) {
+         publishTaskRoute(taskInfo)
+-        if (!isHostWindowTask(taskInfo) || taskInfo.windowingMode != WINDOWING_MODE_FREEFORM) {
++        val previousWindowingMode =
++            lastHostWindowingModeByTaskId.put(taskInfo.taskId, taskInfo.windowingMode)
++        val hostTask =
++            isHostWindowTask(taskInfo) &&
++                (taskInfo.windowingMode == WINDOWING_MODE_FREEFORM ||
++                    taskInfo.windowingMode == WINDOWING_MODE_FULLSCREEN)
++        if (!hostTask) {
+             hostDragResizingTaskIds.remove(taskInfo.taskId)
+             lastHostBoundsGenerationByTaskId.remove(taskInfo.taskId)
+             lastPublishedByTaskId.remove(taskInfo.taskId)
+             pendingHostRequestByTaskId.remove(taskInfo.taskId)
+             return
+         }
++        // A host task that just entered fullscreen must publish MAXIMIZED to
++        // the compositor/HWC so the top caption strip drag can restore it to
++        // the freeform window (the drag handler keys off the maximized state).
++        if (
++            taskInfo.windowingMode == WINDOWING_MODE_FULLSCREEN &&
++                previousWindowingMode == WINDOWING_MODE_FREEFORM
++        ) {
++            val restoreBounds = taskInfo.lastNonFullscreenBounds
++            if (restoreBounds != null && !restoreBounds.isEmpty) {
++                publishRequestedAndroidState(taskInfo, TaskWindowState.MAXIMIZED, restoreBounds)
++            } else {
++                publishCurrentState(taskInfo)
++            }
++            return
++        }
+         val pending = pendingHostRequestByTaskId[taskInfo.taskId]
+         if (pending == null) {
+             publishCurrentState(taskInfo)
+@@ -362,7 +385,8 @@ internal class WaydroidTaskWindowStateBridge(
+         val taskInfo = shellTaskOrganizer.getRunningTaskInfo(request.taskId)
+         if (
+             taskInfo == null || !isHostWindowTask(taskInfo) ||
+-                taskInfo.windowingMode != WINDOWING_MODE_FREEFORM
++                (taskInfo.windowingMode != WINDOWING_MODE_FREEFORM &&
++                    taskInfo.windowingMode != WINDOWING_MODE_FULLSCREEN)
+         ) {
+             hostDragResizingTaskIds.remove(request.taskId)
+             lastHostBoundsGenerationByTaskId[request.taskId] = request.generation
+@@ -421,7 +445,13 @@ internal class WaydroidTaskWindowStateBridge(
+             return
+         }
+         val taskInfo = shellTaskOrganizer.getRunningTaskInfo(taskId) ?: return
+-        if (!isHostWindowTask(taskInfo) || taskInfo.windowingMode != WINDOWING_MODE_FREEFORM) return
++        if (
++            !isHostWindowTask(taskInfo) ||
++                (taskInfo.windowingMode != WINDOWING_MODE_FREEFORM &&
++                    taskInfo.windowingMode != WINDOWING_MODE_FULLSCREEN)
++        ) {
++            return
++        }
+         pendingHostRequestByTaskId[taskId] = HostRequest(state, generation)
+ 
+         val currentState = getCurrentState(taskInfo)
+@@ -440,7 +470,32 @@ internal class WaydroidTaskWindowStateBridge(
+             TaskWindowState.MINIMIZED ->
+                 desktopTasksController.minimizeTask(taskInfo, MinimizeReason.KEY_GESTURE)
+             TaskWindowState.NORMAL, TaskWindowState.MAXIMIZED ->
+-                if (repository.isMinimizedTask(taskId)) {
++                if (
++                    state == TaskWindowState.NORMAL &&
++                        taskInfo.windowingMode == WINDOWING_MODE_FULLSCREEN
++                ) {
++                    // The user dragged the fullscreen window's top strip down:
++                    // the compositor unmaximized it and wants the task back as
++                    // a freeform window. Move the task out of FULLSCREEN with
++                    // the restored bounds, then ack the state to the HWC.
++                    val restoreBounds =
++                        taskInfo.lastNonFullscreenBounds
++                            ?.takeUnless { it.isEmpty }
++                            ?: Rect()
++                    desktopTasksController.restoreWaydroidHostTaskFromFullscreen(
++                        taskInfo,
++                        restoreBounds,
++                    )
++                    publishState(
++                        taskInfo.taskId,
++                        TaskWindowState.NORMAL,
++                        restoreBounds,
++                        TaskWindowStateSource.HOST,
++                        generation,
++                        force = true,
++                        clearPending = false,
++                    )
++                } else if (repository.isMinimizedTask(taskId)) {
+                     desktopTasksController.moveTaskToFront(
+                         taskInfo,
+                         unminimizeReason = UnminimizeReason.UNKNOWN,
+@@ -472,7 +527,11 @@ internal class WaydroidTaskWindowStateBridge(
+             if (taskId == 0) shellTaskOrganizer.getRunningTasks()
+             else listOfNotNull(shellTaskOrganizer.getRunningTaskInfo(taskId))
+         for (taskInfo in tasks) {
+-            if (isHostWindowTask(taskInfo) && taskInfo.windowingMode == WINDOWING_MODE_FREEFORM) {
++            if (
++                isHostWindowTask(taskInfo) &&
++                    (taskInfo.windowingMode == WINDOWING_MODE_FREEFORM ||
++                        taskInfo.windowingMode == WINDOWING_MODE_FULLSCREEN)
++            ) {
+                 publishCurrentState(
+                     taskInfo,
+                     source = TaskWindowStateSource.RECONCILE,
+@@ -538,6 +597,9 @@ internal class WaydroidTaskWindowStateBridge(
+     private fun getCurrentState(taskInfo: RunningTaskInfo): Int {
+         val repository = userRepositories.getProfile(taskInfo.userId)
+         if (repository.isMinimizedTask(taskInfo.taskId)) return TaskWindowState.MINIMIZED
++        if (taskInfo.windowingMode == WINDOWING_MODE_FULLSCREEN) {
++            return TaskWindowState.MAXIMIZED
++        }
+         val displayLayout = displayController.getDisplayLayout(taskInfo.displayId)
+         return if (
+             repository.getBoundsBeforeMaximize(taskInfo.taskId) != null ||
+-- 
+2.43.0
+
