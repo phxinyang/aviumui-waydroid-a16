@@ -1,0 +1,34 @@
+AviumUI x Waydroid A16 build recipe
+===================================
+
+This repository is a build recipe (manifests, patch series, build scripts
+and documentation) for producing AviumUI (LineageOS 23.2 / Android 16)
+Waydroid arm64 system/vendor images.
+
+License structure
+-----------------
+
+- Repository-level code authored in this repository (build scripts,
+  manifests, documentation, and patches written for this project) is
+  licensed under the Apache License, Version 2.0, unless a file states
+  otherwise.
+- Patches under `patches/a16/upstream/` originate from upstream projects
+  (AOSP, LineageOS, Waydroid, and their contributors). They retain the
+  licenses of the projects they modify (Apache-2.0 for AOSP/LineageOS
+  components, GPL-3.0 for Waydroid components).
+- Patches that modify GPL-licensed Waydroid components
+  (`hardware/waydroid`, `device/waydroid`, `vendor/extra`, and related
+  components) are derivative works of GPL-3.0 code; distributing builds
+  that include them must comply with GPL-3.0.
+- Waydroid vendor components carry a commercial-use exception; see the
+  upstream Waydroid repositories for the exact terms.
+
+Upstream sources
+----------------
+
+- AviumUI: https://github.com/AviumUI/android_manifests (branch avium-16.2)
+- Waydroid: https://github.com/waydroid
+- AOSP/LineageOS: as pinned by the locked manifest
+
+This repository does not contain Android source code; all source is
+fetched from the upstream repositories listed above.

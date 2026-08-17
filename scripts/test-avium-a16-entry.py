@@ -310,7 +310,7 @@ def main() -> int:
             raise AssertionError(f"retired entrypoint is not fail-closed: {retired}")
 
     executable_scripts = sorted(ROOT.joinpath("scripts").glob("*.sh"))
-    historical_tablet = "192.168.3." + "132"
+    historical_tablet = "<lan-ip>" + "132"
     for script in executable_scripts:
         if historical_tablet in script.read_text(encoding="utf-8"):
             raise AssertionError(f"historical tablet address remains executable: {script}")

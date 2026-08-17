@@ -16,7 +16,7 @@
 | 容器只读 `/sys` 使 apexd 的 sysfs 调优失败 | system/apex best-effort sysfs 修复 | 已纳入 release series |
 | `libavium_utils` 依赖不存在的 generated kernel headers | vendor/avium 删除无用依赖 | 已纳入 release series |
 | platform_testing 仍引用被移除的 Cuttlefish 模块 | 删除过时依赖 | 已纳入 release series |
-| Linux launch、Avium full UI 与 MiFreeform 被全局 desktop 策略混合 | system-UID launch cookie、Task/TaskInfo per-task route、WM Shell route 发布、HWC route map | 已纳入 window series；[`a16-window-locked-replay-20260811-r2`](../evidence/a16-window-locked-replay-20260811-r2/) 已从四个固定 base tree 验证重放，仍需同镜像真机复验 |
+| Linux launch、Avium full UI 与 MiFreeform 被全局 desktop 策略混合 | system-UID launch cookie、Task/TaskInfo per-task route、WM Shell route 发布、HWC route map | 已纳入 window series；`a16-window-locked-replay-20260811-r2` 已从四个固定 base tree 验证重放，仍需同镜像真机复验 |
 | Avium A16 的 Pop-Up View、硬件键和旋转 API 已变化，但 WmTests 仍调用旧字段/签名 | 测试按当前 `Action`、`endTask`、`inPortPopUpView` 和 `getNaturalRotation()` 语义对齐，并新增 system UID/cookie 双条件鉴权覆盖 | 已作为独立 test-only patch 纳入 window series；完整 WmTests APK 与三个过滤配置已编译，尚未在设备端运行 instrumentation |
 | external task 与 full UI 不能同时稳定存在 | HWC hybrid carrier、独立 full-UI latch、按 task route 管理 `xdg_toplevel` | 已纳入 window series；需真机生命周期复验 |
 | 快速拖动旧帧与多-layer 重复标题栏 | live task 优先于 snapshot、primary-child ownership、每帧退休未使用 subsurface | 已纳入 window series；仍是明确真机回归门 |
@@ -58,7 +58,7 @@
 | SystemUI 重启后 host 窗口桥可能保留已失效 callback，HWC 仍存活导致 Framework 不触发重新注册 | Framework 在 HIDL state 返回失败时清空 service、清理 pending bounds 并走既有 reconnect；HWC 在 callback 已失效时让 `setTaskWindowState` 返回失败；断连期间 retired window 列表在 Wayland sync 失败时交换并释放 | 已纳入 window series（frameworks-base 0016、hardware-waydroid 0016）；hardware expected tree `0559a57c`，需真机 SystemUI restart 回归 |
 | Framework freeform caption 判断残留 `FreeformDbg` 调试日志 | 删除该日志，保留正式 caption 路由判断 | 已纳入 window series（frameworks-base 0017）；需随 clean build 复验 |
 
-这些条目的精确 patch 路径和完成 tree 以 series JSON 为准；历史因果和日志交叉核对可见 [`docs/FIXES.md`](FIXES.md)。
+这些条目的精确 patch 路径和完成 tree 以 series JSON 为准。
 
 ## 配方/构建脚本修复
 
@@ -84,7 +84,7 @@
 
 ## 证伪实验
 
-以下方案排除出正式设计：旧 `services.jar` 热补丁、叠加式 Avium APK/smali 链、RawName/包名/Caption 顺序推断 task、substring 黑名单、固定 min/max 尺寸、按 bounds/display 变化迁移 task、全局 `forceResizable`，以及 `set-window-mode.sh` 的 android/compat/native 三选一模式。native 黑屏实验和旧镜像也不是产品入口。具体文件索引见 [`docs/ARCHIVE.md`](ARCHIVE.md)。
+以下方案排除出正式设计：旧 `services.jar` 热补丁、叠加式 Avium APK/smali 链、RawName/包名/Caption 顺序推断 task、substring 黑名单、固定 min/max 尺寸、按 bounds/display 变化迁移 task、全局 `forceResizable`，以及 `set-window-mode.sh` 的 android/compat/native 三选一模式。native 黑屏实验和旧镜像也不是产品入口。
 
 | 尝试 | 结果 | 结论 |
 | --- | --- | --- |
@@ -108,4 +108,4 @@
 
 **真机验证**：开机仅 1 条悬浮条；`LAUNCHER_MINI_WINDOW` 广播启动 mark.via → 浮窗 677x1204（适配）、任务在 Display #2。侧边栏路径（ForegroundService → ChooseAppFloatingView → launchAppNormally → ACTION_START_INTENT）与广播同路径，待用户实测确认。
 
-**环境注意**：2026-08-16 平板重启后 `/var/lib/waydroid/waydroid.cfg` 再次被清零（老毛病，备份目录已有 `waydroid.cfg.zeroed-20260810`），已从 `waydroid.cfg.bak-gralloc` 恢复（损坏文件保留为 `waydroid.cfg.zeroed-20260816`）。平板 IP 现为 `<tablet-ip>`。
+**环境注意**：2026-08-16 平板重启后 `/var/lib/waydroid/waydroid.cfg` 再次被清零（老毛病，备份目录已有 `waydroid.cfg.zeroed-20260810`），已从 `waydroid.cfg.bak-gralloc` 恢复（损坏文件保留为 `waydroid.cfg.zeroed-20260816`）。平板 IP 现为 `<tablet-host>`。

@@ -1,0 +1,18 @@
+[submodule "upstream/device-waydroid"]
+	path = upstream/device-waydroid
+	url = https://github.com/waydroid/android_device_waydroid_waydroid.git
+[submodule "upstream/hardware-waydroid"]
+	path = upstream/hardware-waydroid
+	url = https://github.com/waydroid/android_hardware_waydroid.git
+[submodule "upstream/vendor-waydroid"]
+	path = upstream/vendor-waydroid
+	url = https://github.com/waydroid/android_vendor_waydroid.git
+[submodule "upstream/vendor-waydroid-init"]
+	path = upstream/vendor-waydroid-init
+	url = https://github.com/waydroid/android_vendor_waydroid_init.git
+[submodule "upstream/frameworks-waydroid"]
+	path = upstream/frameworks-waydroid
+	url = https://github.com/WayDroid-ATV/android_frameworks_waydroid.git
+[submodule "upstream/waydroid"]
+	path = upstream/waydroid
+	url = https://github.com/waydroid/waydroid.git

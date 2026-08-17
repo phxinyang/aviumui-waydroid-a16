@@ -23,9 +23,10 @@ __pycache__/
 # 本地远程调试脚本（与正式 scripts/ 重复，不发布）
 /.remote-scripts/
 
-# 会话与本地杂项
+# 会话、编辑器和本地杂项
+/.agents/
+/.codex/
+/--help/
+.vscode/
 .history
 *.log
-
-# 编辑器本地元数据
-.vscode/

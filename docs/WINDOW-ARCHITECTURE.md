@@ -30,7 +30,7 @@ WM Shell 只监听 TaskInfo 的 appeared/info-changed/vanished，并通过 `vend
 
 ## 正式补丁边界
 
-唯一 window recipe 是 [`patches/windowing/a16/series.json`](../patches/windowing/a16/series.json)，固定四个 project 的 base/expected tree 与每个 patch SHA-256。应用器 [`scripts/apply-a16-windowing-patches.py`](../scripts/apply-a16-windowing-patches.py) 先在临时 worktree 完整重放，再做 ff-only 更新；输入校验、check-only、完成态和失败恢复语义有隔离测试。locked replay 的 before/after 采集同时记录 commit HEAD 和 `HEAD^{tree}`：check-only 必须让基准 checkout 的两者保持不变且 tree 等于 `base_tree`，而临时 worktree 的重放结果由 `result.json` 中的 `expected_tree` 独立证明；[`scripts/verify-window-replay-evidence.py`](../scripts/verify-window-replay-evidence.py) 对这两个不同身份做机器检查。
+唯一 window recipe 是 [`patches/windowing/a16/series.json`](../patches/windowing/a16/series.json)，固定四个 project 的 base/expected tree 与每个 patch SHA-256。应用器 [`scripts/apply-a16-windowing-patches.py`](../scripts/apply-a16-windowing-patches.py) 先在临时 worktree 完整重放，再做 ff-only 更新；输入校验、check-only、完成态和失败恢复语义有隔离测试。locked replay 的 before/after 采集同时记录 commit HEAD 和 `HEAD^{tree}`：check-only 必须让基准 checkout 的两者保持不变且 tree 等于 `base_tree`，而临时 worktree 的重放结果由 `result.json` 中的 `expected_tree` 独立证明。
 
 设备侧保留 HAL 1.3 manifest，以及 `0005-keep-default-display-off-desk.patch`：默认屏不进 A16 Desk。旧 `0000-waydroid-tablet-desktop-capability.patch` 会让 secondary/freeform display 全局 desktop-first，可能接管 MiFreeform，因此不在正式 series 中。Linux host 窗口走 per-task host route；Desk 关闭后由 frameworks-base 0008 单独启动 host 桥。frameworks-base 0009 让 SystemUI 的 DesktopFirst 注册在无 Desk 时变成空操作，避免 KeyguardService 崩循环把图层藏掉。旧顶层 `patches/windowing/frameworks-base/`、`hardware-waydroid/` 以及多代 Python patcher 均不是正式输入。
 
