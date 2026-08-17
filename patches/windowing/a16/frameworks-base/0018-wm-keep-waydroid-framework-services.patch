@@ -1,0 +1,25 @@
+From 516c172111614732710c27d7e39b64044649d7b0 Mon Sep 17 00:00:00 2001
+From: Avium Window Reproducer <avium-window-reproducer@example.invalid>
+Date: Mon, 17 Aug 2026 10:46:55 +0000
+Subject: [PATCH] wm: keep Waydroid framework services under R8 shrinking
+
+WaySystemServer starts WayDroidService by a class name string read from the config_externalWayDroidServices resource array. R8 cannot see the resource reference, so it strips id.waydro.server.WayDroidService from the optimized services jar and the system server fails to create the service at boot. Keep the whole id.waydro package so the framework-side Waydroid services survive shrinking.
+
+Change-Id: Ie02cb94fa896015db5617e37aed75f275cb21af7
+---
+ services/proguard.flags | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/services/proguard.flags b/services/proguard.flags
+index dbc5ef7141df..539255e65cc3 100644
+--- a/services/proguard.flags
++++ b/services/proguard.flags
+@@ -141,3 +141,5 @@
+ 
+ # Waydroid
+ -dontwarn vendor.waydroid.**
++-keep,allowoptimization,allowaccessmodification class id.waydro.** { *; }
++-dontwarn id.waydro.**
+-- 
+2.43.0
+
